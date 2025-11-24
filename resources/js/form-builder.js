@@ -65,6 +65,136 @@ function triggerResponsesFetch() {
     }
 }
 
+function enableDragHandle(element) {
+    if (!element || element.dataset.dragHandleInit === 'true') {
+        return;
+    }
+
+    const handle = element.querySelector('[data-drag-handle]');
+    if (!handle) {
+        return;
+    }
+
+    element.dataset.dragHandleInit = 'true';
+    element.dataset.dragReady = 'false';
+    element.dataset.dragging = 'false';
+    element.setAttribute('draggable', 'true');
+
+    handle.setAttribute('draggable', 'false');
+    handle.addEventListener('dragstart', (event) => event.preventDefault());
+
+    const enable = () => {
+        element.dataset.dragReady = 'true';
+    };
+
+    const disable = () => {
+        if (element.dataset.dragging !== 'true') {
+            element.dataset.dragReady = 'false';
+        }
+    };
+
+    ['mousedown', 'touchstart'].forEach((eventName) => {
+        handle.addEventListener(eventName, enable, { passive: true });
+    });
+
+    ['mouseup', 'touchend', 'touchcancel'].forEach((eventName) => {
+        handle.addEventListener(eventName, disable, { passive: true });
+    });
+}
+
+function initSortable() {
+    const container = document.getElementById('questions-container');
+    if (!container) {
+        return;
+    }
+
+    let dragSrcEl = null;
+    let dragPlaceholder = null;
+
+    function createPlaceholder(height, isSection = false) {
+        const placeholder = document.createElement('div');
+        placeholder.className = isSection
+            ? 'section-divider placeholder border-2 border-dashed border-red-300 rounded-lg my-2'
+            : 'question-card placeholder border-2 border-dashed border-red-300 rounded-lg my-2';
+        placeholder.style.height = `${height}px`;
+        placeholder.style.backgroundColor = '#fff';
+        return placeholder;
+    }
+
+    function handleDragStart(event) {
+        const target = event.currentTarget;
+        dragSrcEl = target;
+        target.classList.add('opacity-60', 'ring-2', 'ring-red-300');
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', '');
+
+        dragPlaceholder = createPlaceholder(target.getBoundingClientRect().height, target.classList.contains('section-divider'));
+    }
+
+    function handleDragEnd() {
+        if (dragSrcEl) {
+            dragSrcEl.classList.remove('opacity-60', 'ring-2', 'ring-red-300');
+        }
+        if (dragPlaceholder && dragPlaceholder.parentNode) {
+            dragPlaceholder.parentNode.removeChild(dragPlaceholder);
+        }
+        dragSrcEl = null;
+        dragPlaceholder = null;
+        updateSectionNumbers();
+        updateQuestionNumbers();
+    }
+
+    function handleDragOver(event) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        const targetCard = event.target.closest('.question-card, .section-divider');
+        if (!targetCard || targetCard === dragSrcEl || (dragPlaceholder && targetCard === dragPlaceholder)) {
+            return;
+        }
+
+        const bounding = targetCard.getBoundingClientRect();
+        const offset = bounding.y + (bounding.height / 2);
+        const parent = targetCard.parentNode;
+        if (!parent) {
+            return;
+        }
+
+        if (!dragPlaceholder.parentNode) {
+            parent.insertBefore(dragPlaceholder, targetCard);
+        } else if (event.clientY > offset) {
+            parent.insertBefore(dragPlaceholder, targetCard.nextSibling);
+        } else {
+            parent.insertBefore(dragPlaceholder, targetCard);
+        }
+    }
+
+    function handleDrop(event) {
+        event.preventDefault();
+        if (dragPlaceholder && dragSrcEl && dragPlaceholder.parentNode === container) {
+            container.insertBefore(dragSrcEl, dragPlaceholder);
+        }
+    }
+
+    function initializeDraggable(element) {
+        if (element.dataset.dragEnabled === 'true') {
+            return;
+        }
+        element.dataset.dragEnabled = 'true';
+        element.setAttribute('draggable', 'true');
+        enableDragHandle(element);
+        element.addEventListener('dragstart', handleDragStart);
+        element.addEventListener('dragend', handleDragEnd);
+    }
+
+    function refreshDraggableElements() {
+        container.querySelectorAll('.question-card, .section-divider').forEach(initializeDraggable);
+    }
+
+    container.addEventListener('dragover', handleDragOver);
+    container.addEventListener('drop', handleDrop);
+    refreshDraggableElements();
+}
+
 function renderQuestionsIncrementally({ questions, sections, container, onComplete, batchSize = 3 }) {
     const questionList = Array.isArray(questions) ? questions : [];
     const sectionList = Array.isArray(sections) ? sections : [];
@@ -206,6 +336,7 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
     }
 
     requestAnimationFrame(processBatch);
+    initSortable();
 }
 
 function createOptionElementNode(type, text = '', index = 0, templateIndex = null) {
@@ -213,14 +344,12 @@ function createOptionElementNode(type, text = '', index = 0, templateIndex = nul
     optionItem.className = 'option-item flex items-center space-x-2';
 
     if (type === 'multiple-choice') {
-        const indicator = document.createElement('input');
-        indicator.type = 'radio';
-        indicator.className = 'text-red-600 focus:ring-red-500 mt-1';
+        const indicator = document.createElement('span');
+        indicator.className = 'w-3 h-3 rounded-full border border-gray-300';
         optionItem.appendChild(indicator);
     } else if (type === 'checkbox') {
-        const indicator = document.createElement('input');
-        indicator.type = 'checkbox';
-        indicator.className = 'rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1';
+        const indicator = document.createElement('span');
+        indicator.className = 'w-3 h-3 border border-gray-300 rounded mt-1';
         optionItem.appendChild(indicator);
     } else if (type === 'dropdown') {
         const order = document.createElement('span');
@@ -577,11 +706,11 @@ function createQuestionCard(type = 'short-answer') {
     questionCard.setAttribute('data-question-type', type);
     questionCard.innerHTML = `
         <!-- Drag Handle -->
-        <div class="absolute top-2 left-1/2 transform -translate-x-1/2 cursor-move opacity-0 group-hover:opacity-100 transition-opacity">
-            <svg class="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+        <button type="button" class="drag-handle absolute top-2 left-1/2 -translate-x-1/2 p-1.5 text-gray-400 hover:text-red-600 rounded-full bg-white/80 shadow opacity-0 group-hover:opacity-100 transition-all cursor-grab focus:outline-none" data-drag-handle>
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 12h18M3 6h18M3 18h18"></path>
             </svg>
-        </div>
+        </button>
 
         <div class="flex items-start space-x-4">
             <div class="flex-1 min-w-0">
@@ -1011,6 +1140,8 @@ function appendResultRuleCard(container) {
 }
 
 let savedRulesState = [];
+let sortableInstance = null;
+let sortableInitialized = false;
 
 function hasFormTemplates() {
     return document.querySelectorAll('.answer-template-card').length > 0;
@@ -2917,6 +3048,7 @@ function populateFormBuilder(data) {
             updateSectionNumbers();
             updateQuestionNumbers();
             updateUseRuleButtonsVisibility();
+            initSortable();
         },
     });
 }
