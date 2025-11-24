@@ -212,7 +212,6 @@ class FormController extends Controller
             $form->update([
                 'title' => $request->title,
                 'description' => $request->description,
-                'slug' => Str::slug($request->title) . '-' . time(),
                 'theme_color' => $request->theme_color ?? 'red',
                 'collect_email' => $request->boolean('collect_email'),
                 'limit_one_response' => $request->boolean('limit_one_response'),
@@ -417,6 +416,18 @@ class FormController extends Controller
         ];
     }
 
+    private function makeTemplateLookupKey(array $templateData): ?string
+    {
+        $answerText = trim($templateData['answer_text'] ?? $templateData['text'] ?? '');
+        if ($answerText === '') {
+            return null;
+        }
+
+        $score = (int) ($templateData['score'] ?? 0);
+
+        return Str::lower($answerText) . '|' . $score;
+    }
+
     /**
      * Sinkronisasi relasi form berdasarkan data dari request.
      */
@@ -441,6 +452,7 @@ class FormController extends Controller
 
         $answerTemplateIdMap = [];
         $answerTemplates = $payload['answer_templates'] ?? [];
+        $answerTemplateLookup = [];
 
         foreach ($answerTemplates as $index => $templateData) {
             if (!is_array($templateData)) {
@@ -459,7 +471,13 @@ class FormController extends Controller
             ]);
 
             $answerTemplateIdMap[$index] = $template->id;
+            $templateKey = $this->makeTemplateLookupKey($templateData);
+            if ($templateKey) {
+                $answerTemplateLookup[$templateKey] = $template->id;
+            }
         }
+
+        $nextTemplateOrder = count($answerTemplateLookup);
 
         $resultRules = $payload['result_rules'] ?? [];
 
@@ -512,6 +530,28 @@ class FormController extends Controller
                 'order' => $index,
             ]);
 
+            $savedRuleTemplateIds = [];
+            if (!empty($questionData['saved_rule']['templates']) && is_array($questionData['saved_rule']['templates'])) {
+                foreach ($questionData['saved_rule']['templates'] as $templateIndex => $templateData) {
+                    $templateKey = $this->makeTemplateLookupKey($templateData);
+                    if (!$templateKey) {
+                        continue;
+                    }
+
+                    if (!isset($answerTemplateLookup[$templateKey])) {
+                        $template = $form->answerTemplates()->create([
+                            'answer_text' => $templateData['answer_text'] ?? $templateData['text'] ?? 'Jawaban',
+                            'score' => $templateData['score'] ?? 0,
+                            'order' => $nextTemplateOrder++,
+                        ]);
+
+                        $answerTemplateLookup[$templateKey] = $template->id;
+                    }
+
+                    $savedRuleTemplateIds[$templateIndex] = $answerTemplateLookup[$templateKey];
+                }
+            }
+
             foreach ($questionData['options'] ?? [] as $optIndex => $optionData) {
                 if (!is_array($optionData)) {
                     continue;
@@ -525,6 +565,8 @@ class FormController extends Controller
                 $answerTemplateId = null;
                 if (isset($optionData['answer_template_id']) && array_key_exists($optionData['answer_template_id'], $answerTemplateIdMap)) {
                     $answerTemplateId = $answerTemplateIdMap[$optionData['answer_template_id']];
+                } elseif (array_key_exists($optIndex, $savedRuleTemplateIds)) {
+                    $answerTemplateId = $savedRuleTemplateIds[$optIndex];
                 }
 
                 $question->options()->create([
@@ -553,10 +595,25 @@ class FormController extends Controller
             ];
         })->toArray();
 
+        $answerTemplatesCollection = $form->answerTemplates
+            ->sortBy('order')
+            ->values();
+
+        $answerTemplateIndexMap = [];
+        $answerTemplatesData = $answerTemplatesCollection
+            ->map(function ($template, $index) use (&$answerTemplateIndexMap) {
+                $answerTemplateIndexMap[$template->id] = $index;
+
+                return [
+                    'answer_text' => $template->answer_text,
+                    'score' => $template->score,
+                ];
+            })->toArray();
+
         $questionsData = $form->questions
             ->sortBy('order')
             ->values()
-            ->map(function ($question) use ($sectionIndexMap) {
+            ->map(function ($question) use ($sectionIndexMap, $answerTemplateIndexMap) {
                 $questionData = [
                     'type' => $question->type,
                     'title' => $question->title,
@@ -573,24 +630,16 @@ class FormController extends Controller
                 $questionData['options'] = $question->options
                     ->sortBy('order')
                     ->values()
-                    ->map(function ($option) {
+                    ->map(function ($option) use ($answerTemplateIndexMap) {
                         return [
                             'text' => $option->text,
-                            'answer_template_id' => null,
+                            'answer_template_index' => $option->answer_template_id !== null && isset($answerTemplateIndexMap[$option->answer_template_id])
+                                ? $answerTemplateIndexMap[$option->answer_template_id]
+                                : null,
                         ];
                     })->toArray();
 
                 return $questionData;
-            })->toArray();
-
-        $answerTemplatesData = $form->answerTemplates
-            ->sortBy('order')
-            ->values()
-            ->map(function ($template) {
-                return [
-                    'answer_text' => $template->answer_text,
-                    'score' => $template->score,
-                ];
             })->toArray();
 
         $resultRulesData = $form->resultRules

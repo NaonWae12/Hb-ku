@@ -208,7 +208,7 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
     requestAnimationFrame(processBatch);
 }
 
-function createOptionElementNode(type, text = '', index = 0) {
+function createOptionElementNode(type, text = '', index = 0, templateIndex = null) {
     const optionItem = document.createElement('div');
     optionItem.className = 'option-item flex items-center space-x-2';
 
@@ -234,6 +234,13 @@ function createOptionElementNode(type, text = '', index = 0) {
     input.placeholder = `Opsi ${index + 1}`;
     input.value = text || '';
     input.className = 'flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input';
+    if (templateIndex !== null && templateIndex !== undefined && templateIndex !== '') {
+        input.dataset.templateIndex = templateIndex;
+        optionItem.dataset.templateIndex = templateIndex;
+    } else {
+        delete input.dataset.templateIndex;
+        optionItem.removeAttribute('data-template-index');
+    }
     optionItem.appendChild(input);
 
     const removeBtn = document.createElement('button');
@@ -267,7 +274,8 @@ function setQuestionOptions(card, questionType, options) {
         : (questionType === 'dropdown' ? [{}, {}] : [{}, {}]);
 
     normalizedOptions.forEach((option, idx) => {
-        const optionNode = createOptionElementNode(questionType, option?.text || '', idx);
+        const templateIndex = option?.answer_template_index ?? option?.answer_template_id ?? null;
+        const optionNode = createOptionElementNode(questionType, option?.text || '', idx, templateIndex);
         if (insertBeforeNode) {
             container.insertBefore(optionNode, insertBeforeNode);
         } else {
@@ -2554,9 +2562,14 @@ function collectFormData() {
                 const optionInput = optionItem.querySelector('.option-input');
                 const optionText = optionInput ? optionInput.value : '';
                 if (optionText && optionText.trim() !== '') {
+                    const templateDataset = optionInput?.dataset?.templateIndex ?? optionItem?.dataset?.templateIndex;
+                    const templateIndex = templateDataset !== undefined && templateDataset !== null && templateDataset !== ''
+                        ? parseInt(templateDataset, 10)
+                        : null;
+
                     questionData.options.push({
                         text: optionText.trim(),
-                        answer_template_id: null
+                        answer_template_id: Number.isInteger(templateIndex) ? templateIndex : null,
                     });
                 }
             });
