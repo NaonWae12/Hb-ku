@@ -4,6 +4,11 @@ let questionCounter = 0;
 let sectionCounter = 0;
 let requestBuilderResponsesData = null;
 let chartJsLoadingPromise = null;
+const dragAndDropState = {
+    container: null,
+    source: null,
+    placeholder: null,
+};
 
 function getMetaContent(name) {
     return document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
@@ -102,97 +107,106 @@ function enableDragHandle(element) {
     });
 }
 
+function createDragPlaceholder(target) {
+    const isSection = target.classList.contains('section-divider');
+    const placeholder = document.createElement('div');
+    placeholder.className = isSection
+        ? 'section-divider placeholder border-2 border-dashed border-red-300 rounded-lg my-2'
+        : 'question-card placeholder border-2 border-dashed border-red-300 rounded-lg my-2';
+    placeholder.style.height = `${target.getBoundingClientRect().height}px`;
+    placeholder.style.backgroundColor = '#fff';
+    return placeholder;
+}
+
+function handleDragStart(event) {
+    const target = event.currentTarget;
+    dragAndDropState.source = target;
+    target.classList.add('opacity-60', 'ring-2', 'ring-red-300');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', '');
+
+    dragAndDropState.placeholder = createDragPlaceholder(target);
+}
+
+function handleDragEnd() {
+    if (dragAndDropState.source) {
+        dragAndDropState.source.classList.remove('opacity-60', 'ring-2', 'ring-red-300');
+    }
+    if (dragAndDropState.placeholder && dragAndDropState.placeholder.parentNode) {
+        dragAndDropState.placeholder.parentNode.removeChild(dragAndDropState.placeholder);
+    }
+    dragAndDropState.source = null;
+    dragAndDropState.placeholder = null;
+    updateSectionNumbers();
+    updateQuestionNumbers();
+}
+
+function handleDragOver(event) {
+    if (!dragAndDropState.container || !dragAndDropState.placeholder) {
+        return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+
+    const targetCard = event.target.closest('.question-card, .section-divider');
+    const container = dragAndDropState.container;
+
+    if (!targetCard || targetCard === dragAndDropState.source || targetCard === dragAndDropState.placeholder) {
+        if (!targetCard && dragAndDropState.placeholder.parentNode !== container) {
+            container.appendChild(dragAndDropState.placeholder);
+        }
+        return;
+    }
+
+    const bounding = targetCard.getBoundingClientRect();
+    const offset = bounding.y + (bounding.height / 2);
+    const parent = targetCard.parentNode || container;
+
+    if (!dragAndDropState.placeholder.parentNode) {
+        parent.insertBefore(dragAndDropState.placeholder, targetCard);
+    } else if (event.clientY > offset) {
+        parent.insertBefore(dragAndDropState.placeholder, targetCard.nextSibling);
+    } else {
+        parent.insertBefore(dragAndDropState.placeholder, targetCard);
+    }
+}
+
+function handleDrop(event) {
+    event.preventDefault();
+    if (dragAndDropState.placeholder && dragAndDropState.source && dragAndDropState.placeholder.parentNode === dragAndDropState.container) {
+        dragAndDropState.container.insertBefore(dragAndDropState.source, dragAndDropState.placeholder);
+    }
+}
+
+function initializeDraggable(element) {
+    if (element.dataset.dragEnabled === 'true') {
+        return;
+    }
+    element.dataset.dragEnabled = 'true';
+    element.setAttribute('draggable', 'true');
+    enableDragHandle(element);
+    element.addEventListener('dragstart', handleDragStart);
+    element.addEventListener('dragend', handleDragEnd);
+}
+
+function refreshDraggableElements(container) {
+    container.querySelectorAll('.question-card, .section-divider').forEach(initializeDraggable);
+}
+
 function initSortable() {
     const container = document.getElementById('questions-container');
     if (!container) {
         return;
     }
 
-    let dragSrcEl = null;
-    let dragPlaceholder = null;
-
-    function createPlaceholder(height, isSection = false) {
-        const placeholder = document.createElement('div');
-        placeholder.className = isSection
-            ? 'section-divider placeholder border-2 border-dashed border-red-300 rounded-lg my-2'
-            : 'question-card placeholder border-2 border-dashed border-red-300 rounded-lg my-2';
-        placeholder.style.height = `${height}px`;
-        placeholder.style.backgroundColor = '#fff';
-        return placeholder;
+    if (dragAndDropState.container !== container) {
+        dragAndDropState.container = container;
+        container.addEventListener('dragover', handleDragOver);
+        container.addEventListener('drop', handleDrop);
     }
 
-    function handleDragStart(event) {
-        const target = event.currentTarget;
-        dragSrcEl = target;
-        target.classList.add('opacity-60', 'ring-2', 'ring-red-300');
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', '');
-
-        dragPlaceholder = createPlaceholder(target.getBoundingClientRect().height, target.classList.contains('section-divider'));
-    }
-
-    function handleDragEnd() {
-        if (dragSrcEl) {
-            dragSrcEl.classList.remove('opacity-60', 'ring-2', 'ring-red-300');
-        }
-        if (dragPlaceholder && dragPlaceholder.parentNode) {
-            dragPlaceholder.parentNode.removeChild(dragPlaceholder);
-        }
-        dragSrcEl = null;
-        dragPlaceholder = null;
-        updateSectionNumbers();
-        updateQuestionNumbers();
-    }
-
-    function handleDragOver(event) {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-        const targetCard = event.target.closest('.question-card, .section-divider');
-        if (!targetCard || targetCard === dragSrcEl || (dragPlaceholder && targetCard === dragPlaceholder)) {
-            return;
-        }
-
-        const bounding = targetCard.getBoundingClientRect();
-        const offset = bounding.y + (bounding.height / 2);
-        const parent = targetCard.parentNode;
-        if (!parent) {
-            return;
-        }
-
-        if (!dragPlaceholder.parentNode) {
-            parent.insertBefore(dragPlaceholder, targetCard);
-        } else if (event.clientY > offset) {
-            parent.insertBefore(dragPlaceholder, targetCard.nextSibling);
-        } else {
-            parent.insertBefore(dragPlaceholder, targetCard);
-        }
-    }
-
-    function handleDrop(event) {
-        event.preventDefault();
-        if (dragPlaceholder && dragSrcEl && dragPlaceholder.parentNode === container) {
-            container.insertBefore(dragSrcEl, dragPlaceholder);
-        }
-    }
-
-    function initializeDraggable(element) {
-        if (element.dataset.dragEnabled === 'true') {
-            return;
-        }
-        element.dataset.dragEnabled = 'true';
-        element.setAttribute('draggable', 'true');
-        enableDragHandle(element);
-        element.addEventListener('dragstart', handleDragStart);
-        element.addEventListener('dragend', handleDragEnd);
-    }
-
-    function refreshDraggableElements() {
-        container.querySelectorAll('.question-card, .section-divider').forEach(initializeDraggable);
-    }
-
-    container.addEventListener('dragover', handleDragOver);
-    container.addEventListener('drop', handleDrop);
-    refreshDraggableElements();
+    refreshDraggableElements(container);
 }
 
 function renderQuestionsIncrementally({ questions, sections, container, onComplete, batchSize = 3 }) {
@@ -497,6 +511,11 @@ function createSectionDivider() {
     sectionDivider.innerHTML = `
         <div class="flex items-center justify-between">
             <div class="flex items-center space-x-3">
+                <button type="button" class="drag-handle p-2 text-gray-400 hover:text-red-600 rounded-full bg-white/80 shadow cursor-grab focus:outline-none" data-drag-handle>
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M3 12h18M3 6h18M3 18h18"></path>
+                    </svg>
+                </button>
                 <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
                     <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -2069,6 +2088,7 @@ document.addEventListener('DOMContentLoaded', function() {
             questionsContainer.appendChild(questionCard);
             updateQuestionNumbers();
             attachQuestionCardEvents(questionCard);
+            initSortable();
             
             // Focus ke input pertanyaan
             setTimeout(() => {
@@ -2095,6 +2115,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateSectionNumbers();
                 });
             }
+            
+            initSortable();
         });
     }
     
@@ -2118,6 +2140,7 @@ document.addEventListener('DOMContentLoaded', function() {
             questionTypesMenu.classList.remove('flex', 'items-center', 'justify-center');
             updateQuestionNumbers();
             attachQuestionCardEvents(questionCard);
+            initSortable();
             
         });
     });
