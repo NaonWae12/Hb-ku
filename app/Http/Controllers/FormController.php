@@ -67,6 +67,7 @@ class FormController extends Controller
             'saveFormUrl' => route('forms.store'),
             'saveFormMethod' => 'POST',
             'formId' => null,
+            'shareUrl' => null,
         ]);
     }
 
@@ -114,6 +115,11 @@ class FormController extends Controller
                 'success' => true,
                 'message' => 'Form berhasil disimpan!',
                 'form_id' => $form->id,
+                'slug' => $form->slug,
+                'share_url' => route('forms.public.show', $form),
+                'edit_url' => route('forms.edit', $form),
+                'update_url' => route('forms.update', $form),
+                'save_method' => 'PUT',
             ]);
 
         } catch (\Exception $e) {
@@ -161,6 +167,7 @@ class FormController extends Controller
             'saveFormUrl' => route('forms.update', $form),
             'saveFormMethod' => 'PUT',
             'formId' => $form->id,
+            'shareUrl' => route('forms.public.show', $form),
         ]);
     }
 
@@ -216,6 +223,11 @@ class FormController extends Controller
                 'success' => true,
                 'message' => 'Form berhasil diperbarui!',
                 'form_id' => $form->id,
+                'slug' => $form->slug,
+                'share_url' => route('forms.public.show', $form),
+                'edit_url' => route('forms.edit', $form),
+                'update_url' => route('forms.update', $form),
+                'save_method' => 'PUT',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -447,6 +459,7 @@ class FormController extends Controller
 
         return [
             'id' => $form->id,
+            'slug' => $form->slug,
             'title' => $form->title,
             'description' => $form->description,
             'theme_color' => $form->theme_color,
@@ -454,6 +467,7 @@ class FormController extends Controller
             'limit_one_response' => (bool) $form->limit_one_response,
             'show_progress_bar' => (bool) $form->show_progress_bar,
             'shuffle_questions' => (bool) $form->shuffle_questions,
+            'share_url' => route('forms.public.show', $form),
             'sections' => $sectionsData,
             'questions' => $questionsData,
             'answer_templates' => $answerTemplatesData,

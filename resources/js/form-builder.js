@@ -3,6 +3,17 @@ console.log('Form Builder JS loaded');
 let questionCounter = 0;
 let sectionCounter = 0;
 
+function getMetaContent(name) {
+    return document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
+}
+
+function setMetaContent(name, value) {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    if (meta) {
+        meta.setAttribute('content', value);
+    }
+}
+
 // Fungsi untuk membuat section divider
 function createSectionDivider() {
     sectionCounter++;
@@ -981,6 +992,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const rootElement = document.getElementById('form-builder-root');
     let initialData = null;
     let formMode = 'create';
+    let formId = getMetaContent('form-id');
+    let saveFormUrl = getMetaContent('save-form-url') || '/forms';
+    let saveFormMethod = (getMetaContent('save-form-method') || 'POST').toUpperCase();
+    const shareLinkBtn = document.getElementById('share-link-btn');
+    let shareLinkUrl = rootElement?.getAttribute('data-share-url') || '';
 
     if (rootElement) {
         const initialAttr = rootElement.getAttribute('data-initial');
@@ -993,6 +1009,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         formMode = rootElement.getAttribute('data-mode') || 'create';
+    }
+
+    const updateShareButtonVisibility = () => {
+        if (!shareLinkBtn) {
+            return;
+        }
+
+        if (shareLinkUrl) {
+            shareLinkBtn.classList.remove('hidden');
+            shareLinkBtn.disabled = false;
+        } else {
+            shareLinkBtn.classList.add('hidden');
+            shareLinkBtn.disabled = true;
+        }
+    };
+
+    updateShareButtonVisibility();
+
+    if (shareLinkBtn) {
+        shareLinkBtn.addEventListener('click', function() {
+            if (shareLinkUrl) {
+                openShareModal(shareLinkUrl);
+            }
+        });
     }
 
     const themeColorButtons = document.querySelectorAll('[data-theme-color]');
@@ -1180,16 +1220,13 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             
             const formData = collectFormData();
-            const saveUrl = document.querySelector('meta[name="save-form-url"]')?.getAttribute('content') || '/forms';
-            const saveMethod = (document.querySelector('meta[name="save-form-method"]')?.getAttribute('content') || 'POST').toUpperCase();
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-            const dashboardUrl = document.querySelector('meta[name="dashboard-url"]')?.getAttribute('content') || '/dashboard';
+            const csrfToken = getMetaContent('csrf-token');
 
             const savedRules = loadSavedRules();
             formData.saved_rules = savedRules;
             
-            fetch(saveUrl, {
-                method: saveMethod,
+            fetch(saveFormUrl, {
+                method: saveFormMethod,
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': csrfToken,
@@ -1207,16 +1244,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 return data;
             })
             .then(data => {
+                if (data.form_id) {
+                    formId = data.form_id;
+                    setMetaContent('form-id', formId);
+                    if (rootElement) {
+                        rootElement.setAttribute('data-form-id', formId);
+                    }
+                }
+
+                if (data.update_url) {
+                    saveFormUrl = data.update_url;
+                    setMetaContent('save-form-url', saveFormUrl);
+                }
+
+                if (data.save_method) {
+                    saveFormMethod = data.save_method.toUpperCase();
+                    setMetaContent('save-form-method', saveFormMethod);
+                } else if (saveFormMethod !== 'PUT') {
+                    saveFormMethod = 'PUT';
+                    setMetaContent('save-form-method', 'PUT');
+                }
+
+                if (data.share_url) {
+                    shareLinkUrl = data.share_url;
+                    if (rootElement) {
+                        rootElement.setAttribute('data-share-url', shareLinkUrl);
+                    }
+                    updateShareButtonVisibility();
+                }
+
+                formMode = 'edit';
+                const saveBtnLabel = saveFormBtn.querySelector('span');
+                if (saveBtnLabel) {
+                    saveBtnLabel.textContent = 'Update Form';
+                }
+
                 showSuccessDialog(data.message || 'Form berhasil disimpan!');
-                setTimeout(() => {
-                    window.location.href = dashboardUrl;
-                }, 2000);
             })
             .catch(error => {
                 console.error('Error:', error);
                 alert(error.message || 'Terjadi kesalahan saat menyimpan form. Silakan coba lagi.');
+            })
+            .finally(() => {
                 saveFormBtn.disabled = false;
-                saveFormBtn.innerHTML = originalButtonHtml;
+                saveFormBtn.innerHTML = saveFormBtn.getAttribute('data-original-html') || originalButtonHtml;
             });
         });
     }
@@ -1804,6 +1875,73 @@ function showSuccessDialog(message) {
             modal.remove();
         }
     }, 3000);
+}
+
+function openShareModal(link) {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Bagikan Formulir</h3>
+            <p class="text-sm text-gray-600 mb-4">Salin tautan berikut dan bagikan kepada responden Anda.</p>
+            <div class="flex items-center space-x-2">
+                <input type="text" readonly class="share-link-input flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none" value="">
+                <button type="button" data-share-copy class="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg">Salin</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">Tautan ini akan membawa responden ke halaman pengisian form.</p>
+            <div class="flex justify-end mt-6">
+                <button type="button" data-share-close class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-red-600">Tutup</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const input = modal.querySelector('.share-link-input');
+    if (input) {
+        input.value = link;
+        input.focus();
+        input.select();
+    }
+
+    const closeModal = () => {
+        modal.remove();
+    };
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    const closeBtn = modal.querySelector('[data-share-close]');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeModal);
+    }
+
+    const copyBtn = modal.querySelector('[data-share-copy]');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+            try {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(link);
+                } else if (input) {
+                    input.select();
+                    document.execCommand('copy');
+                }
+                copyBtn.textContent = 'Disalin!';
+                copyBtn.classList.remove('bg-red-600');
+                copyBtn.classList.add('bg-green-600');
+                setTimeout(() => {
+                    copyBtn.textContent = 'Salin';
+                    copyBtn.classList.remove('bg-green-600');
+                    copyBtn.classList.add('bg-red-600');
+                }, 1500);
+            } catch (error) {
+                alert('Gagal menyalin tautan. Silakan salin secara manual.');
+            }
+        });
+    }
 }
 
 function updateThemeColorSelection(color) {

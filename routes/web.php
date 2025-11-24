@@ -1,12 +1,16 @@
 <?php
 
-use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\FormController;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PublicFormController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return redirect()->route('login');
 });
+
+Route::get('/f/{form:slug}', [PublicFormController::class, 'show'])->name('forms.public.show');
+Route::post('/f/{form:slug}', [PublicFormController::class, 'submit'])->name('forms.public.submit');
 
 Route::get('/dashboard', [FormController::class, 'index'])->middleware(['auth', 'verified'])->name('dashboard');
 
