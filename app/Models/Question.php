@@ -15,12 +15,15 @@ class Question extends Model
         'title',
         'description',
         'image',
+        'image_alignment',
+        'image_width',
         'is_required',
         'order',
     ];
 
     protected $casts = [
         'is_required' => 'boolean',
+        'image_width' => 'integer',
     ];
 
     // Relationships

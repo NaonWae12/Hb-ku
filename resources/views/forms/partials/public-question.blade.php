@@ -6,6 +6,13 @@
     $oldArray = $isCheckbox
         ? collect(old($inputKey, []))->map(fn ($value) => (int) $value)->toArray()
         : [];
+    $imageAlignment = $question->image_alignment ?? 'center';
+    $alignmentClass = match ($imageAlignment) {
+        'left' => 'text-left',
+        'right' => 'text-right',
+        default => 'text-center',
+    };
+    $imageWidth = $question->image_width ?? 100;
 @endphp
 
 <div>
@@ -24,8 +31,10 @@
     </div>
 
     @if($question->image)
-        <div class="mb-4">
-            <img src="{{ $question->image }}" alt="Gambar pertanyaan" class="rounded-xl border border-gray-200 max-h-80 object-cover w-full">
+        <div class="mb-4 {{ $alignmentClass }}">
+            <img src="{{ asset($question->image) }}" alt="Gambar pertanyaan"
+                class="rounded-xl border border-gray-200 object-contain inline-block max-w-full"
+                style="width: {{ $imageWidth }}%; max-width: 100%;">
         </div>
     @endif
 

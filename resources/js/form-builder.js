@@ -267,12 +267,35 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
 
         const questionImage = questionCard.querySelector('.question-image');
         const imageArea = questionCard.querySelector('.question-image-area');
-        if (questionData.image && questionImage && imageArea) {
-            questionImage.src = questionData.image;
+        const imageValueInput = questionCard.querySelector('.question-image-value');
+        const imageSettings = questionCard.querySelector('.question-image-settings');
+        const alignmentSelect = questionCard.querySelector('.image-alignment-select');
+        const widthRange = questionCard.querySelector('.image-width-range');
+        const widthDisplay = questionCard.querySelector('.image-width-display');
+        const existingImageSrc = questionData.image_url || questionData.image || '';
+
+        if (existingImageSrc && questionImage && imageArea) {
+            questionImage.src = existingImageSrc;
             imageArea.classList.remove('hidden');
+            imageSettings?.classList.remove('hidden');
         } else if (questionImage && imageArea) {
             questionImage.removeAttribute('src');
             imageArea.classList.add('hidden');
+            imageSettings?.classList.add('hidden');
+        }
+
+        if (imageValueInput) {
+            imageValueInput.value = questionData.image || '';
+        }
+        if (alignmentSelect) {
+            alignmentSelect.value = questionData.image_alignment ?? 'center';
+        }
+        if (widthRange) {
+            const widthValue = questionData.image_width ?? 100;
+            widthRange.value = widthValue;
+            if (widthDisplay) {
+                widthDisplay.textContent = `${widthValue}%`;
+            }
         }
 
         const extraSettings = questionData.extra_settings || {};
@@ -769,6 +792,24 @@ function createQuestionCard(type = 'short-answer') {
 
                 <!-- Hidden File Input -->
                 <input type="file" accept="image/*" class="hidden image-file-input" data-question-id="${questionCounter}">
+                <input type="hidden" class="question-image-value">
+                <div class="question-image-settings hidden mt-4 space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Posisi gambar</label>
+                        <select class="image-alignment-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Lebar gambar</label>
+                        <div class="flex items-center space-x-3 mt-1">
+                            <input type="range" min="30" max="100" step="5" value="100" class="image-width-range flex-1 accent-red-600">
+                            <span class="image-width-display text-xs text-gray-500 w-12 text-right">100%</span>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Question Input Area -->
                 <div class="question-input-area">
@@ -2406,6 +2447,40 @@ function attachQuestionCardEvents(card) {
     const imageArea = card.querySelector('.question-image-area');
     const questionImage = card.querySelector('.question-image');
     const removeImageBtn = card.querySelector('.remove-image-btn');
+    const imageValueInput = card.querySelector('.question-image-value');
+    const imageSettings = card.querySelector('.question-image-settings');
+    const alignmentSelect = card.querySelector('.image-alignment-select');
+    const widthRange = card.querySelector('.image-width-range');
+    const widthDisplay = card.querySelector('.image-width-display');
+
+    const updateImageWidthDisplay = () => {
+        if (widthDisplay && widthRange) {
+            widthDisplay.textContent = `${widthRange.value}%`;
+        }
+    };
+
+    const showImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.remove('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.remove('hidden');
+        }
+        updateImageWidthDisplay();
+    };
+
+    const hideImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.add('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.add('hidden');
+        }
+    };
+
+    if (widthRange) {
+        widthRange.addEventListener('input', updateImageWidthDisplay);
+    }
     
     if (addImageBtn && imageFileInput) {
         addImageBtn.addEventListener('click', function() {
@@ -2422,9 +2497,10 @@ function attachQuestionCardEvents(card) {
                     if (questionImage) {
                         questionImage.src = e.target.result;
                     }
-                    if (imageArea) {
-                        imageArea.classList.remove('hidden');
+                    if (imageValueInput) {
+                        imageValueInput.value = e.target.result;
                     }
+                    showImageControls();
                 };
                 reader.readAsDataURL(file);
             }
@@ -2434,22 +2510,31 @@ function attachQuestionCardEvents(card) {
     if (questionImage) {
         questionImage.addEventListener('error', function() {
             questionImage.removeAttribute('src');
-            if (imageArea) {
-                imageArea.classList.add('hidden');
+            hideImageControls();
+            if (imageValueInput) {
+                imageValueInput.value = '';
             }
         });
     }
     
     if (removeImageBtn) {
         removeImageBtn.addEventListener('click', function() {
-            if (imageArea) {
-                imageArea.classList.add('hidden');
-            }
+            hideImageControls();
             if (questionImage) {
                 questionImage.src = '';
             }
             if (imageFileInput) {
                 imageFileInput.value = '';
+            }
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+            if (alignmentSelect) {
+                alignmentSelect.value = 'center';
+            }
+            if (widthRange) {
+                widthRange.value = 100;
+                updateImageWidthDisplay();
             }
         });
     }
@@ -2709,6 +2794,17 @@ function collectFormData() {
                 questionData.image = src;
             }
         }
+        const imageValueInput = questionCard.querySelector('.question-image-value');
+        const imageAlignmentSelect = questionCard.querySelector('.image-alignment-select');
+        const imageWidthRange = questionCard.querySelector('.image-width-range');
+
+        if (imageValueInput) {
+            const storedValue = imageValueInput.value?.trim();
+            questionData.image = storedValue || questionData.image || null;
+        }
+
+        questionData.image_alignment = imageAlignmentSelect?.value || 'center';
+        questionData.image_width = imageWidthRange ? parseInt(imageWidthRange.value, 10) : null;
 
         if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionData.type)) {
             const optionItems = questionCard.querySelectorAll('.option-item');
@@ -2723,7 +2819,7 @@ function collectFormData() {
 
                     questionData.options.push({
                         text: optionText.trim(),
-                        answer_template_id: Number.isInteger(templateIndex) ? templateIndex : null,
+                        answer_template_index: Number.isInteger(templateIndex) ? templateIndex : null,
                     });
                 }
             });

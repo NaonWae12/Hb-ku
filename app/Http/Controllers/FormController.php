@@ -7,6 +7,7 @@ use App\Models\FormResponse;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class FormController extends Controller
@@ -428,6 +429,93 @@ class FormController extends Controller
         return Str::lower($answerText) . '|' . $score;
     }
 
+    private function processQuestionImage(?string $imageValue, Form $form): ?string
+    {
+        if ($imageValue === null || $imageValue === '') {
+            return null;
+        }
+
+        if (str_starts_with($imageValue, 'data:image')) {
+            return $this->storeBase64Image($imageValue, $form);
+        }
+
+        return $imageValue;
+    }
+
+    private function storeBase64Image(string $base64, Form $form): string
+    {
+        if (!preg_match('/^data:image\/(\w+);base64,/', $base64, $type)) {
+            throw new \RuntimeException('Invalid image data.');
+        }
+
+        $extension = strtolower($type[1]);
+        $extension = $extension === 'jpeg' ? 'jpg' : $extension;
+        if (!in_array($extension, ['jpg', 'png'], true)) {
+            $extension = 'jpg';
+        }
+
+        $base64 = substr($base64, strpos($base64, ',') + 1);
+        $imageData = base64_decode($base64);
+
+        if ($imageData === false) {
+            throw new \RuntimeException('Failed to decode image.');
+        }
+
+        $image = imagecreatefromstring($imageData);
+        if ($image === false) {
+            throw new \RuntimeException('Invalid image contents.');
+        }
+
+        $image = $this->resizeImageResource($image);
+
+        ob_start();
+        if ($extension === 'png') {
+            imagepng($image, null, 8);
+        } else {
+            imagejpeg($image, null, 85);
+            $extension = 'jpg';
+        }
+        $contents = ob_get_clean();
+        imagedestroy($image);
+
+        if ($contents === false) {
+            throw new \RuntimeException('Unable to prepare image for storage.');
+        }
+
+        $directory = "question-images/{$form->id}";
+        $filename = Str::random(40) . '.' . $extension;
+        Storage::disk('public')->put("{$directory}/{$filename}", $contents);
+
+        return "storage/{$directory}/{$filename}";
+    }
+
+    /**
+     * Resize GD image resource while keeping aspect ratio.
+     *
+     * @param  \GdImage  $image
+     */
+    private function resizeImageResource($image, int $maxWidth = 1600)
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+
+        if ($width <= $maxWidth) {
+            return $image;
+        }
+
+        $ratio = $maxWidth / $width;
+        $newWidth = $maxWidth;
+        $newHeight = (int) round($height * $ratio);
+
+        $resampled = imagecreatetruecolor($newWidth, $newHeight);
+        imagealphablending($resampled, false);
+        imagesavealpha($resampled, true);
+        imagecopyresampled($resampled, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+        imagedestroy($image);
+
+        return $resampled;
+    }
+
     /**
      * Sinkronisasi relasi form berdasarkan data dari request.
      */
@@ -525,7 +613,11 @@ class FormController extends Controller
                 'type' => $questionData['type'] ?? 'short-answer',
                 'title' => $title !== '' ? $title : 'Pertanyaan tanpa judul',
                 'description' => $questionData['description'] ?? null,
-                'image' => $questionData['image'] ?? null,
+                'image' => $this->processQuestionImage($questionData['image'] ?? null, $form),
+                'image_alignment' => $questionData['image_alignment'] ?? 'center',
+                'image_width' => isset($questionData['image_width'])
+                    ? (int) $questionData['image_width']
+                    : null,
                 'is_required' => (bool) ($questionData['is_required'] ?? false),
                 'order' => $index,
             ]);
@@ -563,8 +655,9 @@ class FormController extends Controller
                 }
 
                 $answerTemplateId = null;
-                if (isset($optionData['answer_template_id']) && array_key_exists($optionData['answer_template_id'], $answerTemplateIdMap)) {
-                    $answerTemplateId = $answerTemplateIdMap[$optionData['answer_template_id']];
+                $templateIndexReference = $optionData['answer_template_index'] ?? $optionData['answer_template_id'] ?? null;
+                if ($templateIndexReference !== null && array_key_exists($templateIndexReference, $answerTemplateIdMap)) {
+                    $answerTemplateId = $answerTemplateIdMap[$templateIndexReference];
                 } elseif (array_key_exists($optIndex, $savedRuleTemplateIds)) {
                     $answerTemplateId = $savedRuleTemplateIds[$optIndex];
                 }
@@ -619,6 +712,9 @@ class FormController extends Controller
                     'title' => $question->title,
                     'description' => $question->description,
                     'image' => $question->image,
+                    'image_alignment' => $question->image_alignment ?? 'center',
+                    'image_width' => $question->image_width ?? 100,
+                    'image_url' => $question->image ? asset($question->image) : null,
                     'is_required' => (bool) $question->is_required,
                     'options' => [],
                 ];
