@@ -1532,11 +1532,14 @@ let answerTemplateCounter = 0;
 let resultRuleCounter = 0;
 
 // Fungsi untuk membuat answer template card
-function createAnswerTemplateCard() {
+function createAnswerTemplateCard(dbId = null) {
     answerTemplateCounter++;
     const templateCard = document.createElement('div');
     templateCard.className = 'answer-template-card bg-gray-50 rounded-lg border border-gray-200 p-4';
     templateCard.setAttribute('data-template-id', answerTemplateCounter);
+    if (dbId) {
+        templateCard.setAttribute('data-db-id', dbId);
+    }
     templateCard.innerHTML = `
         <div class="flex items-center space-x-3">
             <div class="flex-1">
@@ -1565,7 +1568,34 @@ function appendAnswerTemplateCard(container) {
 
     const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
     if (deleteBtn) {
-        deleteBtn.addEventListener('click', function() {
+        deleteBtn.addEventListener('click', async function() {
+            const dbId = templateCard.getAttribute('data-db-id');
+            const formId = getMetaContent('form-id');
+            
+            // If form is saved and template has database ID, delete from database
+            if (formId && dbId) {
+                try {
+                    const response = await fetch(`/forms/${formId}/answer-templates/${dbId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal menghapus template.');
+                    }
+                } catch (error) {
+                    console.error('Error deleting template:', error);
+                    alert('Gagal menghapus template dari database: ' + error.message);
+                    return; // Don't remove from DOM if database delete failed
+                }
+            }
+            
+            // Remove from DOM
             templateCard.remove();
             if (container.children.length === 0) {
                 container.innerHTML = getAnswerTemplatesPlaceholder();
@@ -1578,11 +1608,14 @@ function appendAnswerTemplateCard(container) {
 }
 
 // Fungsi untuk membuat result rule card
-function createResultRuleCard() {
+function createResultRuleCard(dbId = null) {
     resultRuleCounter++;
     const ruleCard = document.createElement('div');
     ruleCard.className = 'result-rule-card bg-gray-50 rounded-lg border border-gray-200 p-4';
     ruleCard.setAttribute('data-rule-id', resultRuleCounter);
+    if (dbId) {
+        ruleCard.setAttribute('data-db-id', dbId);
+    }
     ruleCard.innerHTML = `
         <div class="flex items-start justify-between mb-3">
             <h5 class="text-sm font-medium text-gray-900">Aturan ${resultRuleCounter}</h5>
@@ -1637,7 +1670,7 @@ function createResultRuleCard() {
 }
 
 function appendResultRuleCard(container) {
-    const ruleCard = createResultRuleCard();
+    const ruleCard = createResultRuleCard(null);
     container.appendChild(ruleCard);
 
     const conditionSelect = ruleCard.querySelector('.rule-condition-type');
@@ -1715,7 +1748,34 @@ function appendResultRuleCard(container) {
 
     const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
     if (deleteRuleBtn) {
-        deleteRuleBtn.addEventListener('click', function () {
+        deleteRuleBtn.addEventListener('click', async function () {
+            const dbId = ruleCard.getAttribute('data-db-id');
+            const formId = getMetaContent('form-id');
+            
+            // If form is saved and rule has database ID, delete from database
+            if (formId && dbId) {
+                try {
+                    const response = await fetch(`/forms/${formId}/result-rules/${dbId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal menghapus aturan.');
+                    }
+                } catch (error) {
+                    console.error('Error deleting rule:', error);
+                    alert('Gagal menghapus aturan dari database: ' + error.message);
+                    return; // Don't remove from DOM if database delete failed
+                }
+            }
+            
+            // Remove from DOM
             ruleCard.remove();
             if (container.children.length === 0) {
                 container.innerHTML = getResultRulesPlaceholder();
@@ -1726,6 +1786,129 @@ function appendResultRuleCard(container) {
     }
 
     return ruleCard;
+}
+
+// Function to attach events to result rule card (used when loading from database)
+function attachResultRuleEvents(ruleCard, container) {
+    const conditionSelect = ruleCard.querySelector('.rule-condition-type');
+    const rangeInputs = ruleCard.querySelector('.rule-range-inputs');
+    const singleInput = ruleCard.querySelector('.rule-single-inputs');
+
+    if (conditionSelect && !conditionSelect.hasAttribute('data-listener')) {
+        conditionSelect.setAttribute('data-listener', 'true');
+        conditionSelect.addEventListener('change', function () {
+            const conditionType = this.value;
+            const singleScoreInput = singleInput.querySelector('.rule-single-score');
+
+            if (conditionType === 'range') {
+                rangeInputs.classList.remove('hidden');
+                singleInput.classList.add('hidden');
+            } else {
+                rangeInputs.classList.add('hidden');
+                singleInput.classList.remove('hidden');
+
+                if (singleScoreInput) {
+                    if (conditionType === 'equal') {
+                        singleScoreInput.placeholder = 'Nilai (sama dengan)';
+                    } else if (conditionType === 'greater') {
+                        singleScoreInput.placeholder = 'Nilai (lebih dari)';
+                    } else if (conditionType === 'less') {
+                        singleScoreInput.placeholder = 'Nilai (kurang dari)';
+                    }
+                }
+            }
+        });
+    }
+
+    const addResultTextBtn = ruleCard.querySelector('.add-result-text-btn');
+    const resultTextsContainer = ruleCard.querySelector('.rule-result-texts');
+
+    if (addResultTextBtn && resultTextsContainer) {
+        if (!addResultTextBtn.hasAttribute('data-listener')) {
+            addResultTextBtn.setAttribute('data-listener', 'true');
+            addResultTextBtn.addEventListener('click', function () {
+                const textItem = document.createElement('div');
+                textItem.className = 'flex items-start space-x-2';
+                textItem.innerHTML = `
+                    <textarea placeholder="Masukkan teks hasil yang akan ditampilkan" rows="2" class="rule-result-text flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-red-600 focus:ring-1 focus:ring-red-600 outline-none resize-none"></textarea>
+                    <button class="delete-result-text-btn p-2 text-gray-400 hover:text-red-600 transition-colors shrink-0" title="Hapus teks">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                `;
+                resultTextsContainer.appendChild(textItem);
+
+                const deleteBtn = textItem.querySelector('.delete-result-text-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', function () {
+                        textItem.remove();
+                        const remaining = resultTextsContainer.querySelectorAll('.rule-result-text');
+                        if (!remaining.length) {
+                            addResultTextBtn.click();
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    const deleteTextBtns = ruleCard.querySelectorAll('.delete-result-text-btn');
+    deleteTextBtns.forEach(btn => {
+        if (!btn.hasAttribute('data-listener')) {
+            btn.setAttribute('data-listener', 'true');
+            btn.addEventListener('click', function () {
+                const textItem = this.closest('.flex.items-start.space-x-2');
+                if (textItem) {
+                    textItem.remove();
+                    const remaining = ruleCard.querySelectorAll('.rule-result-text');
+                    if (!remaining.length && addResultTextBtn) {
+                        addResultTextBtn.click();
+                    }
+                }
+            });
+        }
+    });
+
+    const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
+    if (deleteRuleBtn && !deleteRuleBtn.hasAttribute('data-listener')) {
+        deleteRuleBtn.setAttribute('data-listener', 'true');
+        deleteRuleBtn.addEventListener('click', async function () {
+            const dbId = ruleCard.getAttribute('data-db-id');
+            const formId = getMetaContent('form-id');
+            
+            // If form is saved and rule has database ID, delete from database
+            if (formId && dbId) {
+                try {
+                    const response = await fetch(`/forms/${formId}/result-rules/${dbId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal menghapus aturan.');
+                    }
+                } catch (error) {
+                    console.error('Error deleting rule:', error);
+                    alert('Gagal menghapus aturan dari database: ' + error.message);
+                    return; // Don't remove from DOM if database delete failed
+                }
+            }
+            
+            // Remove from DOM
+            ruleCard.remove();
+            if (container.children.length === 0) {
+                container.innerHTML = getResultRulesPlaceholder();
+            }
+            renderSavedRulesChips();
+            updateUseRuleButtonsVisibility();
+        });
+    }
 }
 
 let savedRulesState = [];
@@ -1811,6 +1994,9 @@ function renderSavedRulesChips() {
         const chip = document.createElement('div');
         chip.className = 'saved-rule-chip inline-flex items-center space-x-2 px-3 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full';
         chip.setAttribute('data-rule-index', index);
+        if (rule.id) {
+            chip.setAttribute('data-preset-id', rule.id);
+        }
 
         const descriptionParts = [];
         if (templates.length) {
@@ -1852,7 +2038,41 @@ function renderSavedRulesChips() {
 
         const removeBtn = chip.querySelector('.remove-saved-rule-btn');
         if (removeBtn) {
-            removeBtn.addEventListener('click', function () {
+            removeBtn.addEventListener('click', async function () {
+                const presetId = chip.getAttribute('data-preset-id');
+                
+                // If preset has database ID, delete from database
+                if (presetId) {
+                    try {
+                        const response = await fetch(`/form-rule-presets/${presetId}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'Accept': 'application/json',
+                            },
+                        });
+                        
+                        const data = await response.json();
+                        if (!response.ok || !data.success) {
+                            throw new Error(data.message || 'Gagal menghapus aturan dari database.');
+                        }
+                        
+                        // Update saved rules state from server response
+                        if (data.presets) {
+                            saveRulesToState(data.presets);
+                            renderSavedRulesChips();
+                            updateUseRuleButtonsVisibility();
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('Error deleting preset:', error);
+                        alert('Gagal menghapus aturan dari database: ' + error.message);
+                        return; // Don't remove from DOM if database delete failed
+                    }
+                }
+                
+                // Fallback: Remove from local state if no database ID
                 const index = parseInt(chip.getAttribute('data-rule-index'), 10);
                 const current = loadSavedRules();
                 current.splice(index, 1);
@@ -3706,6 +3926,10 @@ function populateFormBuilder(data) {
     const resultRulesContainer = document.getElementById('result-rules-container');
     const questionsContainer = document.getElementById('questions-container');
     
+    // Clear saved rules state (this is global, but we want to ensure clean state)
+    // Note: savedRulesState is for global presets, not form-specific rules
+    // Form-specific rules come from data.answer_templates and data.result_rules
+    
     if (answerTemplatesContainer) {
         answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
     }
@@ -3746,6 +3970,9 @@ function populateFormBuilder(data) {
     });
 
     if (answerTemplatesContainer) {
+        // Ensure container is cleared first
+        answerTemplatesContainer.innerHTML = '';
+        
         const templates = Array.isArray(data.answer_templates) ? data.answer_templates : [];
 
         if (templates.length === 0) {
@@ -3753,7 +3980,7 @@ function populateFormBuilder(data) {
             updateRuleSaveControlsVisibility();
         } else {
             templates.forEach((template) => {
-                const templateCard = createAnswerTemplateCard();
+                const templateCard = createAnswerTemplateCard(template.id || null);
                 answerTemplatesContainer.appendChild(templateCard);
 
                 const textInput = templateCard.querySelector('.answer-template-text');
@@ -3765,9 +3992,39 @@ function populateFormBuilder(data) {
                     scoreInput.value = template.score ?? 0;
                 }
 
+                // Delete button event listener is already attached in appendAnswerTemplateCard
+                // But we need to re-attach it here since we're creating the card directly
                 const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
-                if (deleteBtn) {
-                    deleteBtn.addEventListener('click', function () {
+                if (deleteBtn && !deleteBtn.hasAttribute('data-listener')) {
+                    deleteBtn.setAttribute('data-listener', 'true');
+                    deleteBtn.addEventListener('click', async function() {
+                        const dbId = templateCard.getAttribute('data-db-id');
+                        const formId = getMetaContent('form-id');
+                        
+                        // If form is saved and template has database ID, delete from database
+                        if (formId && dbId) {
+                            try {
+                                const response = await fetch(`/forms/${formId}/answer-templates/${dbId}`, {
+                                    method: 'DELETE',
+                                    headers: {
+                                        'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                                        'X-Requested-With': 'XMLHttpRequest',
+                                        'Accept': 'application/json',
+                                    },
+                                });
+                                
+                                const data = await response.json();
+                                if (!response.ok || !data.success) {
+                                    throw new Error(data.message || 'Gagal menghapus template.');
+                                }
+                            } catch (error) {
+                                console.error('Error deleting template:', error);
+                                alert('Gagal menghapus template dari database: ' + error.message);
+                                return; // Don't remove from DOM if database delete failed
+                            }
+                        }
+                        
+                        // Remove from DOM
                         templateCard.remove();
                         if (answerTemplatesContainer.children.length === 0) {
                             answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
@@ -3781,13 +4038,16 @@ function populateFormBuilder(data) {
     }
 
     if (resultRulesContainer) {
+        // Ensure container is cleared first
+        resultRulesContainer.innerHTML = '';
+        
         const rules = Array.isArray(data.result_rules) ? data.result_rules : [];
 
         if (rules.length === 0) {
             resultRulesContainer.innerHTML = getResultRulesPlaceholder();
         } else {
             rules.forEach((rule) => {
-                const ruleCard = createResultRuleCard();
+                const ruleCard = createResultRuleCard(rule.id || null);
                 resultRulesContainer.appendChild(ruleCard);
 
                 const conditionSelect = ruleCard.querySelector('.rule-condition-type');
@@ -3832,15 +4092,8 @@ function populateFormBuilder(data) {
                     }
                 });
 
-                const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
-                if (deleteRuleBtn) {
-                    deleteRuleBtn.addEventListener('click', function () {
-                        ruleCard.remove();
-                        if (resultRulesContainer.children.length === 0) {
-                            resultRulesContainer.innerHTML = getResultRulesPlaceholder();
-                        }
-                    });
-                }
+                // Attach events to rule card (including delete button)
+                attachResultRuleEvents(ruleCard, resultRulesContainer);
             });
         }
     }

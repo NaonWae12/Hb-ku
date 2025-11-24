@@ -57,5 +57,31 @@ class FormRulePresetController extends Controller
             'presets' => $presets,
         ]);
     }
+
+    public function destroy(FormRulePreset $formRulePreset): JsonResponse
+    {
+        $user = auth()->user();
+
+        // Ensure the preset belongs to the authenticated user
+        if ($formRulePreset->user_id !== $user->id) {
+            abort(403, 'Unauthorized');
+        }
+
+        $formRulePreset->delete();
+
+        // Return updated list of presets
+        $presets = $user->formRulePresets()
+            ->latest()
+            ->get()
+            ->map
+            ->toBuilderPayload()
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Aturan berhasil dihapus.',
+            'presets' => $presets,
+        ]);
+    }
 }
 

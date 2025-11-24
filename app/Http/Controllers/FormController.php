@@ -159,13 +159,14 @@ class FormController extends Controller
                     $optionQuery->orderBy('order');
                 }])->orderBy('order');
             },
-            'answerTemplates' => function ($query) {
-                $query->orderBy('order');
+            'answerTemplates' => function ($query) use ($form) {
+                $query->where('form_id', $form->id)->orderBy('order');
             },
-            'resultRules' => function ($query) {
-                $query->with(['texts' => function ($textQuery) {
-                    $textQuery->orderBy('order');
-                }])->orderBy('order');
+            'resultRules' => function ($query) use ($form) {
+                $query->where('form_id', $form->id)
+                    ->with(['texts' => function ($textQuery) {
+                        $textQuery->orderBy('order');
+                    }])->orderBy('order');
             },
             'resultSettings' => function ($query) {
                 $query->orderBy('order');
@@ -225,11 +226,24 @@ class FormController extends Controller
             ]);
 
             // Hapus relasi lama sebelum sinkronisasi ulang
+            // Gunakan DB::table untuk memastikan semua data benar-benar dihapus berdasarkan form_id
+            // Hapus result_rule_texts terlebih dahulu karena ada foreign key constraint
+            \DB::table('result_rule_texts')
+                ->whereIn('result_rule_id', function($query) use ($form) {
+                    $query->select('id')
+                        ->from('result_rules')
+                        ->where('form_id', $form->id);
+                })
+                ->delete();
+            
+            // Hapus semua data berdasarkan form_id
+            \DB::table('answer_templates')->where('form_id', $form->id)->delete();
+            \DB::table('result_rules')->where('form_id', $form->id)->delete();
+            \DB::table('result_settings')->where('form_id', $form->id)->delete();
+            
+            // Hapus questions dan sections setelah menghapus dependencies
             $form->questions()->delete();
             $form->sections()->delete();
-            $form->answerTemplates()->delete();
-            $form->resultRules()->delete();
-            $form->resultSettings()->delete();
 
             $this->syncFormRelations($form, [
                 'sections' => $request->input('sections', []),
@@ -258,6 +272,56 @@ class FormController extends Controller
                 'message' => 'Terjadi kesalahan saat memperbarui form: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Menghapus answer template dari form.
+     */
+    public function destroyAnswerTemplate(Form $form, $templateId)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $template = $form->answerTemplates()->find($templateId);
+        if (!$template) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Template tidak ditemukan.',
+            ], 404);
+        }
+
+        $template->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Template berhasil dihapus.',
+        ]);
+    }
+
+    /**
+     * Menghapus result rule dari form.
+     */
+    public function destroyResultRule(Form $form, $ruleId)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $rule = $form->resultRules()->find($ruleId);
+        if (!$rule) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aturan tidak ditemukan.',
+            ], 404);
+        }
+
+        $rule->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Aturan berhasil dihapus.',
+        ]);
     }
 
     /**
@@ -583,6 +647,7 @@ class FormController extends Controller
             }
 
             $template = $form->answerTemplates()->create([
+                'form_id' => $form->id, // Explicitly set form_id to ensure it's bound to this form
                 'answer_text' => $answerText,
                 'score' => $templateData['score'] ?? 0,
                 'order' => $index,
@@ -606,6 +671,7 @@ class FormController extends Controller
             }
 
             $rule = $form->resultRules()->create([
+                'form_id' => $form->id, // Explicitly set form_id to ensure it's bound to this form
                 'condition_type' => $ruleData['condition_type'] ?? 'range',
                 'min_score' => $ruleData['min_score'] ?? null,
                 'max_score' => $ruleData['max_score'] ?? null,
@@ -725,6 +791,7 @@ class FormController extends Controller
             }
 
             $form->resultSettings()->create([
+                'form_id' => $form->id, // Explicitly set form_id
                 'result_rule_id' => $resultRuleId,
                 'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
                 'image_alignment' => $settingData['image_alignment'] ?? 'center',
@@ -766,6 +833,7 @@ class FormController extends Controller
                 $answerTemplateIndexMap[$template->id] = $index;
 
                 return [
+                    'id' => $template->id,
                     'answer_text' => $template->answer_text,
                     'score' => $template->score,
                 ];

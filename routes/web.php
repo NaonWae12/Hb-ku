@@ -28,7 +28,10 @@ Route::middleware('auth')->group(function () {
     Route::post('/forms', [FormController::class, 'store'])->name('forms.store');
     Route::put('/forms/{form}', [FormController::class, 'update'])->name('forms.update');
     Route::delete('/forms/{form}', [FormController::class, 'destroy'])->name('forms.destroy');
+    Route::delete('/forms/{form}/answer-templates/{template}', [FormController::class, 'destroyAnswerTemplate'])->name('forms.answer-templates.destroy');
+    Route::delete('/forms/{form}/result-rules/{rule}', [FormController::class, 'destroyResultRule'])->name('forms.result-rules.destroy');
     Route::post('/form-rule-presets', [FormRulePresetController::class, 'store'])->name('form-rule-presets.store');
+    Route::delete('/form-rule-presets/{formRulePreset}', [FormRulePresetController::class, 'destroy'])->name('form-rule-presets.destroy');
 });
 
 require __DIR__.'/auth.php';
