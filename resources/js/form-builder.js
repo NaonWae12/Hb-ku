@@ -273,7 +273,9 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
         const widthRange = questionCard.querySelector('.image-width-range');
         const widthDisplay = questionCard.querySelector('.image-width-display');
         const existingImageSrc = questionData.image_url || questionData.image || '';
+        const existingImagePath = questionData.image || '';
 
+        // Set image display (use full URL for display)
         if (existingImageSrc && questionImage && imageArea) {
             questionImage.src = existingImageSrc;
             imageArea.classList.remove('hidden');
@@ -284,12 +286,31 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
             imageSettings?.classList.add('hidden');
         }
 
+        // Set image value input (use storage path, not full URL)
         if (imageValueInput) {
-            imageValueInput.value = questionData.image || '';
+            // If image is a full URL, extract the path part
+            let imagePath = existingImagePath;
+            if (imagePath && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
+                try {
+                    const urlPath = new URL(imagePath).pathname;
+                    imagePath = urlPath.startsWith('/') ? urlPath.substring(1) : urlPath;
+                } catch (e) {
+                    // If URL parsing fails, try to extract path manually
+                    const match = imagePath.match(/\/storage\/.+$/);
+                    if (match) {
+                        imagePath = match[0].substring(1); // Remove leading /
+                    }
+                }
+            }
+            imageValueInput.value = imagePath || '';
         }
+
+        // Set alignment
         if (alignmentSelect) {
             alignmentSelect.value = questionData.image_alignment ?? 'center';
         }
+
+        // Set width
         if (widthRange) {
             const widthValue = questionData.image_width ?? 100;
             widthRange.value = widthValue;
@@ -2786,23 +2807,26 @@ function collectFormData() {
             questionData.section_id = currentSectionIndex;
         }
 
+        const imageValueInput = questionCard.querySelector('.question-image-value');
+        const imageAlignmentSelect = questionCard.querySelector('.image-alignment-select');
+        const imageWidthRange = questionCard.querySelector('.image-width-range');
         const imageArea = questionCard.querySelector('.question-image-area');
         const questionImageEl = questionCard.querySelector('.question-image');
-        if (imageArea && questionImageEl && !imageArea.classList.contains('hidden')) {
+
+        // Prioritize imageValueInput (contains base64 for new uploads or storage path for existing)
+        if (imageValueInput && imageValueInput.value && imageValueInput.value.trim() !== '') {
+            questionData.image = imageValueInput.value.trim();
+        } else if (imageArea && questionImageEl && !imageArea.classList.contains('hidden')) {
+            // Fallback to src attribute if imageValueInput is empty
             const src = questionImageEl.getAttribute('src');
             if (src && src.trim() !== '') {
                 questionData.image = src;
             }
-        }
-        const imageValueInput = questionCard.querySelector('.question-image-value');
-        const imageAlignmentSelect = questionCard.querySelector('.image-alignment-select');
-        const imageWidthRange = questionCard.querySelector('.image-width-range');
-
-        if (imageValueInput) {
-            const storedValue = imageValueInput.value?.trim();
-            questionData.image = storedValue || questionData.image || null;
+        } else {
+            questionData.image = null;
         }
 
+        // Always set alignment and width from controls
         questionData.image_alignment = imageAlignmentSelect?.value || 'center';
         questionData.image_width = imageWidthRange ? parseInt(imageWidthRange.value, 10) : null;
 

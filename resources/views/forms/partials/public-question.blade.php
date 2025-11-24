@@ -32,9 +32,23 @@
 
     @if($question->image)
         <div class="mb-4 {{ $alignmentClass }}">
-            <img src="{{ asset($question->image) }}" alt="Gambar pertanyaan"
+            @php
+                // Ensure the image path is properly formatted for asset() helper
+                $imagePath = $question->image;
+                // If it's already a full URL, use it as-is
+                if (str_starts_with($imagePath, 'http://') || str_starts_with($imagePath, 'https://')) {
+                    $imageUrl = $imagePath;
+                } else {
+                    // Otherwise, use asset() to generate the full URL
+                    // Remove leading slash if present to ensure proper path
+                    $imagePath = ltrim($imagePath, '/');
+                    $imageUrl = asset($imagePath);
+                }
+            @endphp
+            <img src="{{ $imageUrl }}" alt="Gambar pertanyaan"
                 class="rounded-xl border border-gray-200 object-contain inline-block max-w-full"
-                style="width: {{ $imageWidth }}%; max-width: 100%;">
+                style="width: {{ $imageWidth }}%; max-width: 100%;"
+                onerror="this.style.display='none';">
         </div>
     @endif
 

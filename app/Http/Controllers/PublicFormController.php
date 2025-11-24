@@ -28,8 +28,7 @@ class PublicFormController extends Controller
                     }]);
             },
             'questions' => function ($query) {
-                $query->whereNull('section_id')
-                    ->orderBy('order')
+                $query->orderBy('order')
                     ->with(['options' => function ($optionQuery) {
                         $optionQuery->orderBy('order')
                             ->with('answerTemplate');
@@ -37,12 +36,159 @@ class PublicFormController extends Controller
             },
         ]);
 
+        // Group questions into pages based on sections as dividers
+        $pages = $this->groupQuestionsIntoPages($form);
+
         return view('forms.public', [
             'form' => $form,
-            'sections' => $form->sections,
-            'unsectionedQuestions' => $form->questions,
+            'pages' => $pages,
+            'totalPages' => count($pages),
             'shareUrl' => route('forms.public.show', $form),
         ]);
+    }
+
+    /**
+     * Group questions into pages where sections act as page dividers.
+     * All questions before a section appear on the same page.
+     * The section and its questions appear on the next page.
+     */
+    private function groupQuestionsIntoPages(Form $form): array
+    {
+        $allQuestions = $form->questions->sortBy('order')->values();
+        $sections = $form->sections->sortBy('order')->values();
+        
+        $pages = [];
+        $currentPageQuestions = [];
+        $currentPageSection = null;
+        
+        // Create a map of section_id to section for quick lookup
+        $sectionMap = $sections->keyBy('id');
+        
+        // Process each question in order
+        foreach ($allQuestions as $question) {
+            $questionSectionId = $question->section_id;
+            
+            if ($questionSectionId === null) {
+                // Question has no section - add to current page
+                $currentPageQuestions[] = $question;
+            } else {
+                // Question belongs to a section
+                $questionSection = $sectionMap->get($questionSectionId);
+                
+                if ($currentPageSection && $currentPageSection->id === $questionSectionId) {
+                    // Same section as current page - add to current page
+                    $currentPageQuestions[] = $question;
+                } else {
+                    // Different section - save current page and start new page
+                    if (count($currentPageQuestions) > 0 || $currentPageSection) {
+                        $pages[] = [
+                            'section' => $currentPageSection,
+                            'questions' => $currentPageQuestions,
+                        ];
+                    }
+                    
+                    // Start new page with this section
+                    $currentPageSection = $questionSection;
+                    $currentPageQuestions = [$question];
+                }
+            }
+        }
+        
+        // Add the last page
+        if (count($currentPageQuestions) > 0 || $currentPageSection) {
+            $pages[] = [
+                'section' => $currentPageSection,
+                'questions' => $currentPageQuestions,
+            ];
+        }
+        
+        // Handle section dividers (sections with no questions)
+        // These should split questions based on order
+        foreach ($sections as $section) {
+            $sectionQuestions = $allQuestions->where('section_id', $section->id);
+            
+            // If this is a section divider (no questions assigned to it)
+            if ($sectionQuestions->isEmpty()) {
+                // Find questions that should be split by this section divider
+                // Questions with order < section.order and no section_id go before
+                // Questions with order > section.order and no section_id go after
+                $questionsBefore = $allQuestions
+                    ->where('order', '<', $section->order)
+                    ->whereNull('section_id')
+                    ->values();
+                
+                $questionsAfter = $allQuestions
+                    ->where('order', '>', $section->order)
+                    ->whereNull('section_id')
+                    ->values();
+                
+                // If we have both before and after, we need to split
+                if ($questionsBefore->isNotEmpty() && $questionsAfter->isNotEmpty()) {
+                    // Rebuild pages to account for this divider
+                    $newPages = [];
+                    $splitDone = false;
+                    
+                    foreach ($pages as $page) {
+                        if (!$splitDone && $page['section'] === null) {
+                            // Check if this page contains questions that should be split
+                            $pageQuestionIds = collect($page['questions'])->pluck('id')->toArray();
+                            $beforeIds = $questionsBefore->pluck('id')->toArray();
+                            $afterIds = $questionsAfter->pluck('id')->toArray();
+                            
+                            $hasBefore = count(array_intersect($pageQuestionIds, $beforeIds)) > 0;
+                            $hasAfter = count(array_intersect($pageQuestionIds, $afterIds)) > 0;
+                            
+                            if ($hasBefore && $hasAfter) {
+                                // Split this page
+                                $beforeQuestions = collect($page['questions'])
+                                    ->where('order', '<', $section->order)
+                                    ->values()
+                                    ->toArray();
+                                
+                                $afterQuestions = collect($page['questions'])
+                                    ->where('order', '>', $section->order)
+                                    ->values()
+                                    ->toArray();
+                                
+                                if (count($beforeQuestions) > 0) {
+                                    $newPages[] = [
+                                        'section' => null,
+                                        'questions' => $beforeQuestions,
+                                    ];
+                                }
+                                
+                                if (count($afterQuestions) > 0) {
+                                    $newPages[] = [
+                                        'section' => $section,
+                                        'questions' => $afterQuestions,
+                                    ];
+                                }
+                                
+                                $splitDone = true;
+                            } else {
+                                $newPages[] = $page;
+                            }
+                        } else {
+                            $newPages[] = $page;
+                        }
+                    }
+                    
+                    if ($splitDone) {
+                        $pages = $newPages;
+                    }
+                }
+            }
+        }
+        
+        // If no pages were created, create one with all questions
+        if (empty($pages)) {
+            $pages[] = [
+                'section' => null,
+                'questions' => $allQuestions->toArray(),
+            ];
+        }
+        
+        return $pages;
     }
 
     public function submit(Request $request, Form $form): RedirectResponse

@@ -61,71 +61,71 @@ document.addEventListener('DOMContentLoaded', () => {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
     const deleteButtons = document.querySelectorAll('.delete-form-btn');
 
-    if (!csrfToken || deleteButtons.length === 0) {
-        return;
-    }
-
-    deleteButtons.forEach((button) => {
-        if (button.getAttribute('data-delete-listener') === 'true') {
-            return;
-        }
-
-        button.setAttribute('data-delete-listener', 'true');
-
-        button.addEventListener('click', function () {
-            const deleteUrl = this.getAttribute('data-delete-url');
-            if (!deleteUrl) {
+    if (csrfToken && deleteButtons.length) {
+        deleteButtons.forEach((button) => {
+            if (button.getAttribute('data-delete-listener') === 'true') {
                 return;
             }
 
-            const buttonRef = this;
+            button.setAttribute('data-delete-listener', 'true');
 
-            showConfirmDialog({
-                title: 'Hapus Form?',
-                message: 'Form dan seluruh data terkait akan dihapus permanen.\nTindakan ini tidak dapat dibatalkan.',
-                confirmText: 'Hapus',
-                cancelText: 'Batal',
-            }).then((confirmed) => {
-                if (!confirmed) {
+            button.addEventListener('click', function () {
+                const deleteUrl = this.getAttribute('data-delete-url');
+                if (!deleteUrl) {
                     return;
                 }
 
-                const originalClasses = buttonRef.getAttribute('data-original-classes') || '';
-                if (!originalClasses) {
-                    buttonRef.setAttribute('data-original-classes', buttonRef.className);
-                }
+                const buttonRef = this;
 
-                buttonRef.disabled = true;
-                buttonRef.classList.add('opacity-50', 'cursor-not-allowed');
+                showConfirmDialog({
+                    title: 'Hapus Form?',
+                    message: 'Form dan seluruh data terkait akan dihapus permanen.\nTindakan ini tidak dapat dibatalkan.',
+                    confirmText: 'Hapus',
+                    cancelText: 'Batal',
+                }).then((confirmed) => {
+                    if (!confirmed) {
+                        return;
+                    }
 
-                fetch(deleteUrl, {
-                    method: 'DELETE',
-                    headers: {
-                        'X-CSRF-TOKEN': csrfToken,
-                        'Accept': 'application/json',
-                    },
-                })
-                    .then((response) => {
-                        if (!response.ok) {
-                            throw new Error('Delete request failed');
-                        }
-                        return response.json();
+                    const originalClasses = buttonRef.getAttribute('data-original-classes') || '';
+                    if (!originalClasses) {
+                        buttonRef.setAttribute('data-original-classes', buttonRef.className);
+                    }
+
+                    buttonRef.disabled = true;
+                    buttonRef.classList.add('opacity-50', 'cursor-not-allowed');
+
+                    fetch(deleteUrl, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': csrfToken,
+                            'Accept': 'application/json',
+                        },
                     })
-                    .then((data) => {
-                        if (data.success) {
-                            window.location.reload();
-                        } else {
-                            throw new Error(data.message || 'Gagal menghapus form');
-                        }
-                    })
-                    .catch((error) => {
-                        console.error(error);
-                        alert('Gagal menghapus form. Silakan coba lagi.');
-                        buttonRef.disabled = false;
-                        buttonRef.className = buttonRef.getAttribute('data-original-classes') || buttonRef.className;
-                        buttonRef.classList.remove('opacity-50', 'cursor-not-allowed');
-                    });
+                        .then((response) => {
+                            if (!response.ok) {
+                                throw new Error('Delete request failed');
+                            }
+                            return response.json();
+                        })
+                        .then((data) => {
+                            if (data.success) {
+                                window.location.reload();
+                            } else {
+                                throw new Error(data.message || 'Gagal menghapus form');
+                            }
+                        })
+                        .catch((error) => {
+                            console.error(error);
+                            alert('Gagal menghapus form. Silakan coba lagi.');
+                            buttonRef.disabled = false;
+                            buttonRef.className = buttonRef.getAttribute('data-original-classes') || buttonRef.className;
+                            buttonRef.classList.remove('opacity-50', 'cursor-not-allowed');
+                        });
+                });
             });
         });
-    });
+    }
+
+    window.initializeQuestionSortable?.();
 });

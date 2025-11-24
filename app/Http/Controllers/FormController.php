@@ -435,10 +435,25 @@ class FormController extends Controller
             return null;
         }
 
+        // If it's base64 data, process it
         if (str_starts_with($imageValue, 'data:image')) {
             return $this->storeBase64Image($imageValue, $form);
         }
 
+        // If it's already a storage path (starts with "storage/"), return as-is
+        if (str_starts_with($imageValue, 'storage/')) {
+            return $imageValue;
+        }
+
+        // If it's a full URL, extract the storage path
+        if (str_starts_with($imageValue, 'http://') || str_starts_with($imageValue, 'https://')) {
+            $path = parse_url($imageValue, PHP_URL_PATH);
+            if ($path && str_starts_with($path, '/storage/')) {
+                return ltrim($path, '/');
+            }
+        }
+
+        // Otherwise, assume it's a storage path
         return $imageValue;
     }
 
@@ -461,7 +476,7 @@ class FormController extends Controller
             throw new \RuntimeException('Failed to decode image.');
         }
 
-        $image = imagecreatefromstring($imageData);
+        $image = \imagecreatefromstring($imageData);
         if ($image === false) {
             throw new \RuntimeException('Invalid image contents.');
         }
@@ -470,13 +485,13 @@ class FormController extends Controller
 
         ob_start();
         if ($extension === 'png') {
-            imagepng($image, null, 8);
+            \imagepng($image, null, 8);
         } else {
-            imagejpeg($image, null, 85);
+            \imagejpeg($image, null, 85);
             $extension = 'jpg';
         }
         $contents = ob_get_clean();
-        imagedestroy($image);
+        \imagedestroy($image);
 
         if ($contents === false) {
             throw new \RuntimeException('Unable to prepare image for storage.');
@@ -484,8 +499,14 @@ class FormController extends Controller
 
         $directory = "question-images/{$form->id}";
         $filename = Str::random(40) . '.' . $extension;
+        
+        // Ensure directory exists
+        Storage::disk('public')->makeDirectory($directory);
+        
+        // Store the file
         Storage::disk('public')->put("{$directory}/{$filename}", $contents);
 
+        // Return path relative to public directory (for asset() helper)
         return "storage/{$directory}/{$filename}";
     }
 
@@ -496,8 +517,8 @@ class FormController extends Controller
      */
     private function resizeImageResource($image, int $maxWidth = 1600)
     {
-        $width = imagesx($image);
-        $height = imagesy($image);
+        $width = \imagesx($image);
+        $height = \imagesy($image);
 
         if ($width <= $maxWidth) {
             return $image;
@@ -507,11 +528,11 @@ class FormController extends Controller
         $newWidth = $maxWidth;
         $newHeight = (int) round($height * $ratio);
 
-        $resampled = imagecreatetruecolor($newWidth, $newHeight);
-        imagealphablending($resampled, false);
-        imagesavealpha($resampled, true);
-        imagecopyresampled($resampled, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-        imagedestroy($image);
+        $resampled = \imagecreatetruecolor($newWidth, $newHeight);
+        \imagealphablending($resampled, false);
+        \imagesavealpha($resampled, true);
+        \imagecopyresampled($resampled, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+        \imagedestroy($image);
 
         return $resampled;
     }

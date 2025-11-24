@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $form->title }} - hb-ku Form</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <style>
+        .form-page {
+            display: none;
+        }
+        .form-page.active {
+            display: block;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="max-w-3xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
@@ -36,7 +44,7 @@
             </div>
         @endif
 
-        <form method="POST" action="{{ route('forms.public.submit', $form) }}" class="space-y-6">
+        <form method="POST" action="{{ route('forms.public.submit', $form) }}" id="public-form" class="space-y-6">
             @csrf
 
             @if($form->collect_email)
@@ -53,41 +61,128 @@
                 </div>
             @endif
 
-            @if($unsectionedQuestions->count())
-                @foreach($unsectionedQuestions as $question)
-                    <div class="bg-white rounded-2xl shadow border border-gray-100 p-6">
-                        @include('forms.partials.public-question', ['question' => $question])
-                    </div>
-                @endforeach
-            @endif
-
-            @foreach($sections as $section)
-                <div class="bg-white rounded-2xl shadow border border-gray-100 p-6">
-                    <div class="mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900">{{ $section->title ?? 'Bagian' }}</h2>
-                        @if($section->description)
-                            <p class="text-sm text-gray-600 mt-1">{{ $section->description }}</p>
-                        @endif
-                    </div>
-
-                    <div class="space-y-6">
-                        @foreach($section->questions as $question)
-                            <div class="border border-gray-100 rounded-xl p-4">
-                                @include('forms.partials.public-question', ['question' => $question])
+            @foreach($pages as $pageIndex => $page)
+                <div class="form-page {{ $pageIndex === 0 ? 'active' : '' }}" data-page="{{ $pageIndex }}">
+                    @if($page['section'])
+                        <div class="bg-white rounded-2xl shadow border border-gray-100 p-6 mb-6">
+                            <div class="mb-4">
+                                <h2 class="text-lg font-semibold text-gray-900">{{ $page['section']->title ?? 'Bagian' }}</h2>
+                                @if($page['section']->description)
+                                    <p class="text-sm text-gray-600 mt-1">{{ $page['section']->description }}</p>
+                                @endif
                             </div>
-                        @endforeach
-                    </div>
+                        </div>
+                    @endif
+
+                    @foreach($page['questions'] as $question)
+                        <div class="bg-white rounded-2xl shadow border border-gray-100 p-6">
+                            @include('forms.partials.public-question', ['question' => $question])
+                        </div>
+                    @endforeach
                 </div>
             @endforeach
 
-            <div class="flex justify-end">
-                <button type="submit"
-                    class="inline-flex items-center px-6 py-3 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg shadow transition">
+            <div class="flex justify-between items-center mt-6">
+                <button type="button" id="prev-page-btn" class="inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg shadow transition hidden">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                    </svg>
+                    Sebelumnya
+                </button>
+                <div class="flex-1 text-center">
+                    <span class="text-sm text-gray-600">
+                        Halaman <span id="current-page">1</span> dari <span id="total-pages">{{ $totalPages }}</span>
+                    </span>
+                </div>
+                <button type="button" id="next-page-btn" class="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg shadow transition">
+                    Selanjutnya
+                    <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                    </svg>
+                </button>
+                <button type="submit" id="submit-btn" class="inline-flex items-center px-6 py-3 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg shadow transition hidden">
                     Kirim Jawaban
                 </button>
             </div>
         </form>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('public-form');
+            const pages = document.querySelectorAll('.form-page');
+            const prevBtn = document.getElementById('prev-page-btn');
+            const nextBtn = document.getElementById('next-page-btn');
+            const submitBtn = document.getElementById('submit-btn');
+            const currentPageSpan = document.getElementById('current-page');
+            const totalPagesSpan = document.getElementById('total-pages');
+            
+            let currentPage = 0;
+            const totalPages = pages.length;
+            
+            function updatePageDisplay() {
+                // Hide all pages
+                pages.forEach((page, index) => {
+                    page.classList.remove('active');
+                    if (index === currentPage) {
+                        page.classList.add('active');
+                    }
+                });
+                
+                // Update page number
+                currentPageSpan.textContent = currentPage + 1;
+                
+                // Show/hide navigation buttons
+                if (currentPage === 0) {
+                    prevBtn.classList.add('hidden');
+                } else {
+                    prevBtn.classList.remove('hidden');
+                }
+                
+                if (currentPage === totalPages - 1) {
+                    nextBtn.classList.add('hidden');
+                    submitBtn.classList.remove('hidden');
+                } else {
+                    nextBtn.classList.remove('hidden');
+                    submitBtn.classList.add('hidden');
+                }
+            }
+            
+            prevBtn.addEventListener('click', function() {
+                if (currentPage > 0) {
+                    currentPage--;
+                    updatePageDisplay();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            });
+            
+            nextBtn.addEventListener('click', function() {
+                // Validate current page before proceeding
+                const currentPageElement = pages[currentPage];
+                const requiredFields = currentPageElement.querySelectorAll('[required]');
+                let isValid = true;
+                
+                requiredFields.forEach(field => {
+                    if (!field.value || (field.type === 'checkbox' && !field.checked)) {
+                        isValid = false;
+                        field.classList.add('border-red-500');
+                    } else {
+                        field.classList.remove('border-red-500');
+                    }
+                });
+                
+                if (isValid && currentPage < totalPages - 1) {
+                    currentPage++;
+                    updatePageDisplay();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else if (!isValid) {
+                    alert('Silakan lengkapi semua field yang wajib diisi.');
+                }
+            });
+            
+            // Initialize
+            updatePageDisplay();
+        });
+    </script>
 </body>
 </html>
-
