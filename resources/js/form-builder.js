@@ -65,6 +65,178 @@ function triggerResponsesFetch() {
     }
 }
 
+function renderQuestionsIncrementally({ questions, sections, container, onComplete, batchSize = 3 }) {
+    const questionList = Array.isArray(questions) ? questions : [];
+    const sectionList = Array.isArray(sections) ? sections : [];
+
+    if (!container) {
+        if (typeof onComplete === 'function') {
+            onComplete();
+        }
+        return;
+    }
+
+    let questionIndex = 0;
+    let currentSectionIndex = -1;
+    const totalQuestions = questionList.length;
+
+    const renderSingleQuestion = (questionData = {}) => {
+        if (
+            questionData.section_id !== undefined &&
+            questionData.section_id !== null &&
+            questionData.section_id !== currentSectionIndex
+        ) {
+            currentSectionIndex = questionData.section_id;
+            const sectionDivider = createSectionDivider();
+            container.appendChild(sectionDivider);
+
+            const sectionInfo = sectionList[currentSectionIndex] || null;
+            const sectionTitleEl = sectionDivider.querySelector('.section-title');
+            if (sectionTitleEl) {
+                sectionTitleEl.textContent = sectionInfo && sectionInfo.title
+                    ? sectionInfo.title
+                    : `Bagian ${currentSectionIndex + 1}`;
+            }
+
+            const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', function () {
+                    sectionDivider.remove();
+                    updateSectionNumbers();
+                });
+            }
+        }
+
+        const questionType = questionData.type || 'short-answer';
+        const questionCard = createQuestionCard(questionType);
+        container.appendChild(questionCard);
+
+        const titleInput = questionCard.querySelector('.question-title');
+        if (titleInput) {
+            titleInput.value = questionData.title || '';
+        }
+
+        const requiredCheckbox = questionCard.querySelector('.required-checkbox');
+        if (requiredCheckbox) {
+            requiredCheckbox.checked = Boolean(questionData.is_required);
+        }
+
+        const questionImage = questionCard.querySelector('.question-image');
+        const imageArea = questionCard.querySelector('.question-image-area');
+        if (questionData.image && questionImage && imageArea) {
+            questionImage.src = questionData.image;
+            imageArea.classList.remove('hidden');
+        } else if (questionImage && imageArea) {
+            questionImage.removeAttribute('src');
+            imageArea.classList.add('hidden');
+        }
+
+        const extraSettings = questionData.extra_settings || {};
+        const validationInput = questionCard.querySelector('.question-validation-input');
+        const validationMessageInput = questionCard.querySelector('.question-validation-message');
+        const extraNotesInput = questionCard.querySelector('.question-extra-notes');
+        const minLengthInput = questionCard.querySelector('.question-min-length');
+        const maxLengthInput = questionCard.querySelector('.question-max-length');
+        const advancedSettingsPanel = questionCard.querySelector('.question-advanced-settings');
+
+        const hasExtraSettings = [
+            extraSettings.validation,
+            extraSettings.validation_message,
+            extraSettings.extra_notes,
+            extraSettings.min_length,
+            extraSettings.max_length,
+        ].some(value => value !== null && value !== undefined && value !== '');
+
+        if (validationInput && extraSettings.validation) {
+            validationInput.value = extraSettings.validation;
+        }
+        if (validationMessageInput && extraSettings.validation_message) {
+            validationMessageInput.value = extraSettings.validation_message;
+        }
+        if (extraNotesInput && extraSettings.extra_notes) {
+            extraNotesInput.value = extraSettings.extra_notes;
+        }
+        if (minLengthInput && extraSettings.min_length !== null && extraSettings.min_length !== undefined) {
+            minLengthInput.value = extraSettings.min_length;
+        }
+        if (maxLengthInput && extraSettings.max_length !== null && extraSettings.max_length !== undefined) {
+            maxLengthInput.value = extraSettings.max_length;
+        }
+        if (hasExtraSettings && advancedSettingsPanel) {
+            advancedSettingsPanel.classList.remove('hidden');
+        }
+
+        if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionType)) {
+            const inputArea = questionCard.querySelector('.question-input-area');
+            const options = Array.isArray(questionData.options) ? questionData.options : [];
+
+            if (inputArea) {
+                let optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
+                const addOptionBtn = questionCard.querySelector('.add-option-btn');
+
+                while (options.length > optionItems.length && addOptionBtn) {
+                    addOptionBtn.click();
+                    optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
+                }
+
+                optionItems.forEach((item, idx) => {
+                    const input = item.querySelector('.option-input');
+                    if (!input) {
+                        return;
+                    }
+
+                    if (idx < options.length) {
+                        input.value = options[idx].text || '';
+                    } else if (options.length === 0) {
+                        if (idx > 1) {
+                            item.remove();
+                        } else {
+                            input.value = '';
+                        }
+                    } else {
+                        item.remove();
+                    }
+                });
+            }
+        }
+
+        if (questionData.saved_rule) {
+            applySavedRuleToQuestion(questionCard, questionData.saved_rule);
+        }
+
+        attachQuestionCardEvents(questionCard);
+
+        const requiredCheckboxEl = questionCard.querySelector('.required-checkbox');
+        if (requiredCheckboxEl) {
+            requiredCheckboxEl.dispatchEvent(new Event('change'));
+        }
+    };
+
+    const processBatch = () => {
+        let processed = 0;
+        while (questionIndex < totalQuestions && processed < batchSize) {
+            renderSingleQuestion(questionList[questionIndex]);
+            questionIndex += 1;
+            processed += 1;
+        }
+
+        if (questionIndex < totalQuestions) {
+            requestAnimationFrame(processBatch);
+        } else if (typeof onComplete === 'function') {
+            onComplete();
+        }
+    };
+
+    if (totalQuestions === 0) {
+        if (typeof onComplete === 'function') {
+            onComplete();
+        }
+        return;
+    }
+
+    requestAnimationFrame(processBatch);
+}
+
 function hydrateRuleBuilderFromPreset(preset) {
     const normalized = normalizeSavedRule(preset);
     const answerTemplatesContainer = document.getElementById('answer-templates-container');
@@ -2768,146 +2940,20 @@ function populateFormBuilder(data) {
 
     const sections = Array.isArray(data.sections) ? data.sections : [];
     const questions = Array.isArray(data.questions) ? data.questions : [];
-    let currentSectionIndex = -1;
 
-    questions.forEach((questionData) => {
-        if (
-            questionData &&
-            questionData.section_id !== undefined &&
-            questionData.section_id !== null &&
-            questionData.section_id !== currentSectionIndex
-        ) {
-            currentSectionIndex = questionData.section_id;
-            const sectionDivider = createSectionDivider();
-            questionsContainer.appendChild(sectionDivider);
-
-            const sectionInfo = sections[currentSectionIndex] || null;
-            const sectionTitleEl = sectionDivider.querySelector('.section-title');
-            if (sectionTitleEl) {
-                sectionTitleEl.textContent = sectionInfo && sectionInfo.title
-                    ? sectionInfo.title
-                    : `Bagian ${currentSectionIndex + 1}`;
+    renderQuestionsIncrementally({
+        questions,
+        sections,
+        container: questionsContainer,
+        onComplete: () => {
+            if (questions.length === 0) {
+                const defaultQuestion = createQuestionCard('short-answer');
+                questionsContainer.appendChild(defaultQuestion);
+                attachQuestionCardEvents(defaultQuestion);
             }
-
-            const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', function () {
-                    sectionDivider.remove();
-                    updateSectionNumbers();
-                });
-            }
-        }
-
-        const questionType = questionData.type || 'short-answer';
-        const questionCard = createQuestionCard(questionType);
-        questionsContainer.appendChild(questionCard);
-
-        const titleInput = questionCard.querySelector('.question-title');
-        if (titleInput) {
-            titleInput.value = questionData.title || '';
-        }
-
-        const requiredCheckbox = questionCard.querySelector('.required-checkbox');
-        if (requiredCheckbox) {
-            requiredCheckbox.checked = Boolean(questionData.is_required);
-        }
-
-        const questionImage = questionCard.querySelector('.question-image');
-        const imageArea = questionCard.querySelector('.question-image-area');
-        if (questionData.image && questionImage && imageArea) {
-            questionImage.src = questionData.image;
-            imageArea.classList.remove('hidden');
-        } else if (questionImage && imageArea) {
-            questionImage.removeAttribute('src');
-            imageArea.classList.add('hidden');
-        }
-
-        const extraSettings = questionData.extra_settings || {};
-        const validationInput = questionCard.querySelector('.question-validation-input');
-        const validationMessageInput = questionCard.querySelector('.question-validation-message');
-        const extraNotesInput = questionCard.querySelector('.question-extra-notes');
-        const minLengthInput = questionCard.querySelector('.question-min-length');
-        const maxLengthInput = questionCard.querySelector('.question-max-length');
-        const advancedSettingsPanel = questionCard.querySelector('.question-advanced-settings');
-
-        const hasExtraSettings = [
-            extraSettings.validation,
-            extraSettings.validation_message,
-            extraSettings.extra_notes,
-            extraSettings.min_length,
-            extraSettings.max_length,
-        ].some(value => value !== null && value !== undefined && value !== '');
-
-        if (validationInput && extraSettings.validation) {
-            validationInput.value = extraSettings.validation;
-        }
-        if (validationMessageInput && extraSettings.validation_message) {
-            validationMessageInput.value = extraSettings.validation_message;
-        }
-        if (extraNotesInput && extraSettings.extra_notes) {
-            extraNotesInput.value = extraSettings.extra_notes;
-        }
-        if (minLengthInput && extraSettings.min_length !== null && extraSettings.min_length !== undefined) {
-            minLengthInput.value = extraSettings.min_length;
-        }
-        if (maxLengthInput && extraSettings.max_length !== null && extraSettings.max_length !== undefined) {
-            maxLengthInput.value = extraSettings.max_length;
-        }
-        if (hasExtraSettings && advancedSettingsPanel) {
-            advancedSettingsPanel.classList.remove('hidden');
-        }
-
-        if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionType)) {
-            const inputArea = questionCard.querySelector('.question-input-area');
-            const options = Array.isArray(questionData.options) ? questionData.options : [];
-
-            if (inputArea) {
-                let optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
-                const addOptionBtn = questionCard.querySelector('.add-option-btn');
-
-                while (options.length > optionItems.length && addOptionBtn) {
-                    addOptionBtn.click();
-                    optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
-                }
-
-                optionItems.forEach((item, idx) => {
-                    const input = item.querySelector('.option-input');
-                    if (!input) {
-                        return;
-                    }
-
-                    if (idx < options.length) {
-                        input.value = options[idx].text || '';
-                    } else if (options.length === 0) {
-                        if (idx > 1) {
-                            item.remove();
-                        } else {
-                            input.value = '';
-                        }
-                    } else {
-                        item.remove();
-                    }
-                });
-            }
-        }
-
-        if (questionData.saved_rule) {
-            applySavedRuleToQuestion(questionCard, questionData.saved_rule);
-        }
-
-        attachQuestionCardEvents(questionCard);
-
-        if (requiredCheckbox) {
-            requiredCheckbox.dispatchEvent(new Event('change'));
-        }
+            updateSectionNumbers();
+            updateQuestionNumbers();
+            updateUseRuleButtonsVisibility();
+        },
     });
-
-    if (questions.length === 0) {
-        const defaultQuestion = createQuestionCard('short-answer');
-        questionsContainer.appendChild(defaultQuestion);
-        attachQuestionCardEvents(defaultQuestion);
-    }
-
-    updateSectionNumbers();
-    updateQuestionNumbers();
 }
