@@ -65,6 +65,8 @@ class FormController extends Controller
             ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
             : [];
 
+        $responseData = $this->emptyResponseData();
+
         return view('forms.create', [
             'formData' => null,
             'formMode' => 'create',
@@ -73,6 +75,9 @@ class FormController extends Controller
             'formId' => null,
             'shareUrl' => null,
             'savedRules' => $savedRules,
+            'totalResponses' => $responseData['totalResponses'],
+            'questionSummaries' => $responseData['questionSummaries'],
+            'individualResponses' => $responseData['individualResponses'],
         ]);
     }
 
@@ -170,6 +175,8 @@ class FormController extends Controller
             ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
             : [];
 
+        $responseData = $this->buildResponseData($form);
+
         return view('forms.create', [
             'formData' => $formData,
             'formMode' => 'edit',
@@ -178,6 +185,9 @@ class FormController extends Controller
             'formId' => $form->id,
             'shareUrl' => route('forms.public.show', $form),
             'savedRules' => $savedRules,
+            'totalResponses' => $responseData['totalResponses'],
+            'questionSummaries' => $responseData['questionSummaries'],
+            'individualResponses' => $responseData['individualResponses'],
         ]);
     }
 
@@ -273,6 +283,173 @@ class FormController extends Controller
                 'message' => 'Terjadi kesalahan saat menghapus form: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Menampilkan halaman ringkasan dan detail jawaban.
+     */
+    public function responses(Form $form)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $form->load([
+            'questions' => function ($query) {
+                $query->with(['options' => function ($optionQuery) {
+                    $optionQuery->orderBy('order');
+                }])->orderBy('order');
+            },
+        ]);
+
+        $responses = $form->responses()
+            ->with(['answers.question', 'answers.questionOption'])
+            ->latest()
+            ->get();
+
+        $questionSummaries = $form->questions->map(function ($question) use ($responses) {
+            $answers = $responses->flatMap(function ($response) use ($question) {
+                return $response->answers->where('question_id', $question->id)->values();
+            });
+
+            $total = $answers->count();
+            $chart = null;
+            $textAnswers = null;
+
+            if (in_array($question->type, ['multiple-choice', 'dropdown', 'checkbox'])) {
+                $labels = [];
+                $counts = [];
+                foreach ($question->options as $option) {
+                    $labels[] = $option->text ?? 'Opsi';
+                    $counts[] = $answers->where('question_option_id', $option->id)->count();
+                }
+
+                $chartType = $question->type === 'checkbox' ? 'bar' : 'pie';
+                $chart = [
+                    'type' => $chartType,
+                    'labels' => $labels,
+                    'values' => $counts,
+                ];
+            } else {
+                $textAnswers = $answers->pluck('answer_text')->filter()->values()->take(50)->toArray();
+            }
+
+            return [
+                'id' => $question->id,
+                'title' => $question->title ?? 'Pertanyaan',
+                'type' => $question->type,
+                'total' => $total,
+                'chart' => $chart,
+                'text_answers' => $textAnswers,
+            ];
+        })->values();
+
+        $individualResponses = $responses->map(function ($response) {
+            return [
+                'id' => $response->id,
+                'submitted_at' => optional($response->created_at)->format('d M Y H:i'),
+                'email' => $response->email,
+                'total_score' => $response->total_score,
+                'result_text' => $response->result_text,
+                'answers' => $response->answers->map(function ($answer) {
+                    return [
+                        'question' => $answer->question->title ?? 'Pertanyaan',
+                        'value' => $answer->questionOption->text ?? $answer->answer_text,
+                    ];
+                })->values()->toArray(),
+            ];
+        })->values();
+
+        return view('forms.responses', [
+            'form' => $form,
+            'totalResponses' => $responses->count(),
+            'questionSummaries' => $questionSummaries,
+            'individualResponses' => $individualResponses,
+        ]);
+    }
+
+    private function emptyResponseData(): array
+    {
+        return [
+            'totalResponses' => 0,
+            'questionSummaries' => [],
+            'individualResponses' => [],
+        ];
+    }
+
+    private function buildResponseData(Form $form): array
+    {
+        $form->loadMissing([
+            'questions' => function ($query) {
+                $query->with(['options' => function ($optionQuery) {
+                    $optionQuery->orderBy('order');
+                }])->orderBy('order');
+            },
+        ]);
+
+        $responses = $form->responses()
+            ->with(['answers.question', 'answers.questionOption'])
+            ->latest()
+            ->get();
+
+        $questionSummaries = $form->questions->map(function ($question) use ($responses) {
+            $answers = $responses->flatMap(function ($response) use ($question) {
+                return $response->answers->where('question_id', $question->id)->values();
+            });
+
+            $total = $answers->count();
+            $chart = null;
+            $textAnswers = null;
+
+            if (in_array($question->type, ['multiple-choice', 'dropdown', 'checkbox'])) {
+                $labels = [];
+                $counts = [];
+                foreach ($question->options as $option) {
+                    $labels[] = $option->text ?? 'Opsi';
+                    $counts[] = $answers->where('question_option_id', $option->id)->count();
+                }
+
+                $chartType = $question->type === 'checkbox' ? 'bar' : 'pie';
+                $chart = [
+                    'type' => $chartType,
+                    'labels' => $labels,
+                    'values' => $counts,
+                ];
+            } else {
+                $textAnswers = $answers->pluck('answer_text')->filter()->values()->take(50)->toArray();
+            }
+
+            return [
+                'id' => $question->id,
+                'title' => $question->title ?? 'Pertanyaan',
+                'type' => $question->type,
+                'total' => $total,
+                'chart' => $chart,
+                'text_answers' => $textAnswers,
+            ];
+        })->values()->toArray();
+
+        $individualResponses = $responses->map(function ($response) {
+            return [
+                'id' => $response->id,
+                'submitted_at' => optional($response->created_at)->format('d M Y H:i'),
+                'email' => $response->email,
+                'total_score' => $response->total_score,
+                'result_text' => $response->result_text,
+                'answers' => $response->answers->map(function ($answer) {
+                    return [
+                        'question' => $answer->question->title ?? 'Pertanyaan',
+                        'value' => $answer->questionOption->text ?? $answer->answer_text,
+                    ];
+                })->values()->toArray(),
+            ];
+        })->values()->toArray();
+
+        return [
+            'totalResponses' => $responses->count(),
+            'questionSummaries' => $questionSummaries,
+            'individualResponses' => $individualResponses,
+        ];
     }
 
     /**

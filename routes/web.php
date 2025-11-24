@@ -23,6 +23,7 @@ Route::middleware('auth')->group(function () {
     // Form routes
     Route::get('/forms/create', [FormController::class, 'create'])->name('forms.create');
     Route::get('/forms/{form}/edit', [FormController::class, 'edit'])->name('forms.edit');
+    Route::get('/forms/{form}/responses', [FormController::class, 'responses'])->name('forms.responses');
     Route::post('/forms', [FormController::class, 'store'])->name('forms.store');
     Route::put('/forms/{form}', [FormController::class, 'update'])->name('forms.update');
     Route::delete('/forms/{form}', [FormController::class, 'destroy'])->name('forms.destroy');

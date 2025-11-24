@@ -114,16 +114,133 @@
         </div>
 
         <!-- Tab Content: Jawaban -->
+        @php
+            $totalResponsesCount = $totalResponses ?? 0;
+            $questionSummariesCollection = collect($questionSummaries ?? []);
+            $individualResponsesCollection = collect($individualResponses ?? []);
+            $questionCount = $questionSummariesCollection->count();
+            $firstResponse = $individualResponsesCollection->first();
+            $latestResponseAt = $firstResponse['submitted_at'] ?? null;
+        @endphp
         <div id="tab-responses" class="tab-content hidden">
-            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
-                <div class="text-center">
-                    <div class="w-20 h-20 bg-red-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                        <svg class="w-12 h-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                        </svg>
+            <div class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                        <p class="text-sm text-gray-500">Total Jawaban</p>
+                        <p class="text-3xl font-semibold text-gray-900 mt-1">{{ $totalResponsesCount }}</p>
+                        <p class="text-xs text-gray-500 mt-2">Jawaban yang sudah terkumpul</p>
                     </div>
-                    <h3 class="text-xl font-medium text-gray-900 mb-2">Belum ada jawaban</h3>
-                    <p class="text-sm text-gray-600">Jawaban akan muncul di sini setelah form dibagikan dan diisi oleh responden</p>
+                    <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                        <p class="text-sm text-gray-500">Pertanyaan Aktif</p>
+                        <p class="text-3xl font-semibold text-gray-900 mt-1">{{ $questionCount }}</p>
+                        <p class="text-xs text-gray-500 mt-2">Pertanyaan yang ditampilkan ke responden</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+                        <p class="text-sm text-gray-500">Jawaban Terbaru</p>
+                        <p class="text-xl font-semibold text-gray-900 mt-1">{{ $latestResponseAt ?? 'Belum ada data' }}</p>
+                        @if($formId)
+                            <a href="{{ route('forms.responses', $formId) }}" class="inline-flex items-center text-sm font-medium text-red-600 hover:text-red-700 mt-3">
+                                Lihat halaman jawaban lengkap
+                                <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                </svg>
+                            </a>
+                        @else
+                            <p class="text-xs text-gray-500 mt-2">Simpan form untuk mulai menerima jawaban.</p>
+                        @endif
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div class="flex items-center justify-between border-b border-gray-100 px-6">
+                        <div class="flex space-x-8">
+                            <button id="builder-summary-tab" type="button" class="builder-response-tab px-4 py-4 text-sm font-medium text-red-600 border-b-2 border-red-600">
+                                Summary
+                            </button>
+                            <button id="builder-individual-tab" type="button" class="builder-response-tab px-4 py-4 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-red-600">
+                                Individual
+                            </button>
+                        </div>
+                        @if($shareUrl)
+                            <button id="builder-open-share" type="button" class="text-sm font-medium text-red-600 hover:text-red-700 flex items-center space-x-2" data-share-url="{{ $shareUrl }}">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 8a3 3 0 013 3v7a3 3 0 01-3 3H6a3 3 0 01-3-3v-7a3 3 0 013-3h9m4-3h-5m0 0V0m0 5l2.5-2.5" />
+                                </svg>
+                                <span>Bagikan Form</span>
+                            </button>
+                        @endif
+                    </div>
+
+                    <div class="px-6 pb-6">
+                        <div id="builder-summary-panel" class="pt-6">
+                            @if($totalResponsesCount === 0)
+                                <div class="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center">
+                                    <p class="text-lg font-medium text-gray-900 mb-2">Belum ada jawaban</p>
+                                    <p class="text-sm text-gray-500">Bagikan link form untuk mulai menerima jawaban responden.</p>
+                                </div>
+                            @else
+                                <div class="space-y-6">
+                                    @foreach($questionSummariesCollection as $summary)
+                                        <div class="border border-gray-100 rounded-xl p-5 shadow-sm">
+                                            <div class="flex items-start justify-between mb-4">
+                                                <div>
+                                                    <p class="text-xs text-gray-500 uppercase tracking-wide">Pertanyaan {{ $loop->iteration }}</p>
+                                                    <h3 class="text-lg font-semibold text-gray-900">{{ $summary['title'] }}</h3>
+                                                </div>
+                                                <span class="text-xs font-medium text-gray-600 bg-gray-100 px-3 py-1 rounded-full">{{ $summary['total'] }} jawaban</span>
+                                            </div>
+
+                                            @if(!empty($summary['chart']))
+                                                <div class="h-64">
+                                                    <canvas id="builder-chart-{{ $summary['id'] }}"></canvas>
+                                                </div>
+                                            @else
+                                                <div class="space-y-3">
+                                                    @if(!empty($summary['text_answers']))
+                                                        @foreach($summary['text_answers'] as $answer)
+                                                            <p class="p-3 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-700">{{ $answer }}</p>
+                                                        @endforeach
+                                                    @else
+                                                        <p class="text-sm text-gray-500">Belum ada jawaban untuk pertanyaan ini.</p>
+                                                    @endif
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+                        </div>
+
+                        <div id="builder-individual-panel" class="pt-6 hidden">
+                            @if($totalResponsesCount === 0)
+                                <div class="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center">
+                                    <p class="text-lg font-medium text-gray-900 mb-2">Belum ada jawaban</p>
+                                    <p class="text-sm text-gray-500">Setelah ada respons, Anda dapat menelusuri jawaban satu per satu di sini.</p>
+                                </div>
+                            @else
+                                <div class="space-y-6">
+                                    <div class="flex items-center justify-between border border-gray-100 rounded-xl p-5">
+                                        <div>
+                                            <p class="text-sm text-gray-500">Jawaban ke-<span id="builder-response-position">1</span> dari {{ $totalResponsesCount }}</p>
+                                            <p class="text-lg font-semibold text-gray-900" id="builder-response-email">-</p>
+                                            <p class="text-sm text-gray-500" id="builder-response-date">-</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-sm text-gray-500">Skor Total</p>
+                                            <p class="text-2xl font-bold text-gray-900" id="builder-response-score">-</p>
+                                        </div>
+                                    </div>
+
+                                    <div id="builder-response-answers" class="space-y-4"></div>
+
+                                    <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+                                        <button id="builder-prev-response" class="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Sebelumnya</button>
+                                        <button id="builder-next-response" class="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Berikutnya</button>
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -325,3 +442,162 @@
 </div>
 
 @endsection
+
+@push('scripts')
+@if($totalResponsesCount > 0)
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+@endif
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const summaryTab = document.getElementById('builder-summary-tab');
+    const individualTab = document.getElementById('builder-individual-tab');
+    const summaryPanel = document.getElementById('builder-summary-panel');
+    const individualPanel = document.getElementById('builder-individual-panel');
+
+    if (summaryTab && individualTab && summaryPanel && individualPanel) {
+        summaryTab.addEventListener('click', () => {
+            summaryTab.classList.add('text-red-600', 'border-red-600');
+            summaryTab.classList.remove('text-gray-500', 'border-transparent');
+            individualTab.classList.remove('text-red-600', 'border-red-600');
+            individualTab.classList.add('text-gray-500', 'border-transparent');
+            summaryPanel.classList.remove('hidden');
+            individualPanel.classList.add('hidden');
+        });
+
+        individualTab.addEventListener('click', () => {
+            individualTab.classList.add('text-red-600', 'border-red-600');
+            individualTab.classList.remove('text-gray-500', 'border-transparent');
+            summaryTab.classList.remove('text-red-600', 'border-red-600');
+            summaryTab.classList.add('text-gray-500', 'border-transparent');
+            individualPanel.classList.remove('hidden');
+            summaryPanel.classList.add('hidden');
+        });
+    }
+
+    const summaryShareBtn = document.getElementById('builder-open-share');
+    const headerShareBtn = document.getElementById('share-link-btn');
+    if (summaryShareBtn && headerShareBtn) {
+        summaryShareBtn.addEventListener('click', () => headerShareBtn.click());
+    }
+
+    @if($totalResponsesCount > 0)
+        const summaryData = @json($questionSummariesCollection->values());
+        summaryData.forEach((item) => {
+            if (!item.chart) {
+                return;
+            }
+
+            const canvas = document.getElementById(`builder-chart-${item.id}`);
+            if (!canvas) {
+                return;
+            }
+
+            const baseColors = ['#F87171', '#FBBF24', '#34D399', '#60A5FA', '#A78BFA', '#F472B6', '#F97316', '#2DD4BF'];
+            const colorSet = item.chart.values.map((_, idx) => baseColors[idx % baseColors.length]);
+
+            new Chart(canvas, {
+                type: item.chart.type,
+                data: {
+                    labels: item.chart.labels,
+                    datasets: [{
+                        label: 'Jumlah Jawaban',
+                        data: item.chart.values,
+                        backgroundColor: colorSet,
+                        borderColor: '#ffffff',
+                        borderWidth: 1,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: item.chart.type === 'bar' ? {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { stepSize: 1 },
+                        },
+                    } : {},
+                },
+            });
+        });
+
+        const builderResponses = @json($individualResponsesCollection->values());
+        let builderResponseIndex = 0;
+
+        const positionEl = document.getElementById('builder-response-position');
+        const emailEl = document.getElementById('builder-response-email');
+        const dateEl = document.getElementById('builder-response-date');
+        const scoreEl = document.getElementById('builder-response-score');
+        const answersContainer = document.getElementById('builder-response-answers');
+        const prevBtn = document.getElementById('builder-prev-response');
+        const nextBtn = document.getElementById('builder-next-response');
+
+        function renderBuilderResponse(index) {
+            const data = builderResponses[index];
+            if (!data || !answersContainer) {
+                return;
+            }
+
+            if (positionEl) positionEl.textContent = index + 1;
+            if (emailEl) emailEl.textContent = data.email || 'Anonim';
+            if (dateEl) dateEl.textContent = data.submitted_at || '-';
+            if (scoreEl) scoreEl.textContent = data.total_score ?? '-';
+
+            answersContainer.innerHTML = '';
+            if (!data.answers.length) {
+                const empty = document.createElement('p');
+                empty.className = 'text-sm text-gray-500';
+                empty.textContent = 'Tidak ada jawaban yang tersedia.';
+                answersContainer.appendChild(empty);
+            } else {
+                data.answers.forEach((answer) => {
+                    const block = document.createElement('div');
+                    block.className = 'p-4 border border-gray-100 rounded-lg';
+
+                    const title = document.createElement('p');
+                    title.className = 'text-sm font-medium text-gray-900';
+                    title.textContent = answer.question;
+
+                    const value = document.createElement('p');
+                    value.className = 'mt-1 text-sm text-gray-700';
+                    value.textContent = answer.value || '-';
+
+                    block.appendChild(title);
+                    block.appendChild(value);
+                    answersContainer.appendChild(block);
+                });
+            }
+
+            if (prevBtn) prevBtn.disabled = index === 0;
+            if (nextBtn) nextBtn.disabled = index === builderResponses.length - 1;
+        }
+
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => {
+                if (builderResponseIndex > 0) {
+                    builderResponseIndex -= 1;
+                    renderBuilderResponse(builderResponseIndex);
+                }
+            });
+        }
+
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => {
+                if (builderResponseIndex < builderResponses.length - 1) {
+                    builderResponseIndex += 1;
+                    renderBuilderResponse(builderResponseIndex);
+                }
+            });
+        }
+
+        if (builderResponses.length > 0) {
+            renderBuilderResponse(0);
+        }
+    @endif
+});
+</script>
+@endpush
