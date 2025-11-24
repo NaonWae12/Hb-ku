@@ -38,6 +38,81 @@ function resetFormRulesBuilder() {
     updateRuleSaveControlsVisibility();
 }
 
+function hydrateRuleBuilderFromPreset(preset) {
+    const normalized = normalizeSavedRule(preset);
+    const answerTemplatesContainer = document.getElementById('answer-templates-container');
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    if (!answerTemplatesContainer || !resultRulesContainer) {
+        return;
+    }
+
+    resetFormRulesBuilder();
+
+    if (normalized.templates?.length) {
+        answerTemplatesContainer.innerHTML = '';
+        normalized.templates.forEach((template) => {
+            const card = appendAnswerTemplateCard(answerTemplatesContainer);
+            const textInput = card.querySelector('.answer-template-text');
+            const scoreInput = card.querySelector('.answer-template-score');
+            if (textInput) {
+                textInput.value = template.answer_text || '';
+            }
+            if (scoreInput) {
+                scoreInput.value = template.score ?? 0;
+            }
+        });
+    }
+
+    if (normalized.result_rules?.length) {
+        resultRulesContainer.innerHTML = '';
+        normalized.result_rules.forEach((rule) => {
+            const ruleCard = appendResultRuleCard(resultRulesContainer);
+            const conditionSelect = ruleCard.querySelector('.rule-condition-type');
+            if (conditionSelect) {
+                conditionSelect.value = rule.condition_type || 'range';
+                conditionSelect.dispatchEvent(new Event('change'));
+            }
+
+            if ((rule.condition_type || 'range') === 'range') {
+                const minInput = ruleCard.querySelector('.rule-min-score');
+                const maxInput = ruleCard.querySelector('.rule-max-score');
+                if (minInput) {
+                    minInput.value = rule.min_score ?? '';
+                }
+                if (maxInput) {
+                    maxInput.value = rule.max_score ?? '';
+                }
+            } else {
+                const singleInput = ruleCard.querySelector('.rule-single-score');
+                if (singleInput) {
+                    singleInput.value = rule.single_score ?? '';
+                }
+            }
+
+            const resultTextsContainer = ruleCard.querySelector('.rule-result-texts');
+            const addTextBtn = ruleCard.querySelector('.add-result-text-btn');
+            const texts = Array.isArray(rule.texts) && rule.texts.length ? rule.texts : [''];
+            texts.forEach((text, idx) => {
+                if (idx === 0) {
+                    const textarea = resultTextsContainer?.querySelector('.rule-result-text');
+                    if (textarea) {
+                        textarea.value = text || '';
+                    }
+                } else if (addTextBtn) {
+                    addTextBtn.click();
+                    const textareas = resultTextsContainer?.querySelectorAll('.rule-result-text');
+                    const textarea = textareas ? textareas[textareas.length - 1] : null;
+                    if (textarea) {
+                        textarea.value = text || '';
+                    }
+                }
+            });
+        });
+    }
+
+    updateRuleSaveControlsVisibility();
+}
+
 // Fungsi untuk membuat section divider
 function createSectionDivider() {
     sectionCounter++;
@@ -103,7 +178,7 @@ const questionTemplates = {
         input: `
             <div class="space-y-2 max-w-md mt-4">
                 <div class="option-item flex items-center space-x-2">
-                    <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
+                    <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 1" 
@@ -116,7 +191,7 @@ const questionTemplates = {
                     </button>
                 </div>
                 <div class="option-item flex items-center space-x-2">
-                    <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
+                    <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 2" 
@@ -157,7 +232,7 @@ const questionTemplates = {
         input: `
             <div class="space-y-2 max-w-md mt-4">
                 <div class="option-item flex items-center space-x-2">
-                    <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
+                    <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 1" 
@@ -170,7 +245,7 @@ const questionTemplates = {
                     </button>
                 </div>
                 <div class="option-item flex items-center space-x-2">
-                    <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
+                    <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 2" 
@@ -518,6 +593,24 @@ function createAnswerTemplateCard() {
     return templateCard;
 }
 
+function appendAnswerTemplateCard(container) {
+    const templateCard = createAnswerTemplateCard();
+    container.appendChild(templateCard);
+
+    const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function() {
+            templateCard.remove();
+            if (container.children.length === 0) {
+                container.innerHTML = getAnswerTemplatesPlaceholder();
+            }
+            updateRuleSaveControlsVisibility();
+        });
+    }
+
+    return templateCard;
+}
+
 // Fungsi untuk membuat result rule card
 function createResultRuleCard() {
     resultRuleCounter++;
@@ -573,6 +666,13 @@ function createResultRuleCard() {
             </div>
         </div>
     `;
+
+    return ruleCard;
+}
+
+function appendResultRuleCard(container) {
+    const ruleCard = createResultRuleCard();
+    container.appendChild(ruleCard);
 
     const conditionSelect = ruleCard.querySelector('.rule-condition-type');
     const rangeInputs = ruleCard.querySelector('.rule-range-inputs');
@@ -640,12 +740,24 @@ function createResultRuleCard() {
             if (textItem) {
                 textItem.remove();
                 const remaining = ruleCard.querySelectorAll('.rule-result-text');
-                if (!remaining.length) {
+                if (!remaining.length && addResultTextBtn) {
                     addResultTextBtn.click();
                 }
             }
         });
     });
+
+    const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
+    if (deleteRuleBtn) {
+        deleteRuleBtn.addEventListener('click', function () {
+            ruleCard.remove();
+            if (container.children.length === 0) {
+                container.innerHTML = getResultRulesPlaceholder();
+            }
+            renderSavedRulesChips();
+            updateUseRuleButtonsVisibility();
+        });
+    }
 
     return ruleCard;
 }
@@ -749,6 +861,11 @@ function renderSavedRulesChips() {
 
         chip.innerHTML = `
             <span class="truncate max-w-[200px]">${descriptionParts.join(' • ')}</span>
+            <button type="button" class="edit-saved-rule-btn text-red-500 hover:text-red-700">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m-1-1v2m-6 6l4 4 9-9-4-4-9 9z"></path>
+                </svg>
+            </button>
             <button type="button" class="remove-saved-rule-btn text-red-500 hover:text-red-700">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -757,6 +874,13 @@ function renderSavedRulesChips() {
         `;
 
         chipsWrapper.appendChild(chip);
+
+        const editBtn = chip.querySelector('.edit-saved-rule-btn');
+        if (editBtn) {
+            editBtn.addEventListener('click', function () {
+                hydrateRuleBuilderFromPreset(rule);
+            });
+        }
 
         const removeBtn = chip.querySelector('.remove-saved-rule-btn');
         if (removeBtn) {
@@ -1145,20 +1269,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (answerTemplatesContainer.querySelector('.answer-templates-placeholder')) {
                 answerTemplatesContainer.innerHTML = '';
             }
-            const templateCard = createAnswerTemplateCard();
-            answerTemplatesContainer.appendChild(templateCard);
+            appendAnswerTemplateCard(answerTemplatesContainer);
             updateRuleSaveControlsVisibility();
-            
-            const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', function() {
-                    templateCard.remove();
-                    if (answerTemplatesContainer.children.length === 0) {
-                        answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
-                    }
-                    updateRuleSaveControlsVisibility();
-                });
-            }
         });
     }
     
@@ -1227,20 +1339,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (resultRulesContainer.querySelector('.result-rules-placeholder')) {
                 resultRulesContainer.innerHTML = '';
             }
-            const ruleCard = createResultRuleCard();
-            resultRulesContainer.appendChild(ruleCard);
-            
-            const deleteBtn = ruleCard.querySelector('.delete-result-rule-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', function() {
-                    ruleCard.remove();
-                    if (resultRulesContainer.children.length === 0) {
-                        resultRulesContainer.innerHTML = getResultRulesPlaceholder();
-                    }
-                    renderSavedRulesChips();
-                    updateUseRuleButtonsVisibility();
-                });
-            }
+            appendResultRuleCard(resultRulesContainer);
         });
     }
     
@@ -1521,11 +1620,18 @@ function attachQuestionCardEvents(card) {
     
     // Click pada card juga trigger highlight
     card.addEventListener('click', function(e) {
-        // Jangan trigger jika klik pada button atau input yang sudah ada handler
-        if (e.target.closest('button') || e.target.closest('input[type="file"]') || e.target.closest('.question-type-dropdown')) {
+        const shouldSkipFocus = e.target.closest('button')
+            || e.target.closest('input')
+            || e.target.closest('textarea')
+            || e.target.closest('select')
+            || e.target.closest('.question-type-dropdown')
+            || e.target.closest('.question-advanced-settings')
+            || e.target.closest('.option-item');
+
+        if (shouldSkipFocus) {
             return;
         }
-        // Focus ke input pertanyaan
+
         if (questionTitle) {
             questionTitle.focus();
         }
@@ -1672,7 +1778,7 @@ function attachOptionEvents(card) {
                 if (type === 'multiple-choice') {
                     newOption = `
                         <div class="option-item flex items-center space-x-2">
-                            <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
+                            <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                             <input 
                                 type="text" 
                                 placeholder="Opsi ${optionCount}" 
@@ -1688,7 +1794,7 @@ function attachOptionEvents(card) {
                 } else if (type === 'checkbox') {
                     newOption = `
                         <div class="option-item flex items-center space-x-2">
-                            <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
+                            <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                             <input 
                                 type="text" 
                                 placeholder="Opsi ${optionCount}" 
@@ -1747,7 +1853,7 @@ function attachOptionEvents(card) {
                 if (type === 'multiple-choice') {
                     newOption = `
                         <div class="option-item flex items-center space-x-2">
-                            <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
+                            <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                             <input 
                                 type="text" 
                                 value="Lainnya" 
@@ -1763,7 +1869,7 @@ function attachOptionEvents(card) {
                 } else if (type === 'checkbox') {
                     newOption = `
                         <div class="option-item flex items-center space-x-2">
-                            <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
+                            <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                             <input 
                                 type="text" 
                                 value="Lainnya" 
