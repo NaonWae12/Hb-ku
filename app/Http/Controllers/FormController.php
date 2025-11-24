@@ -65,7 +65,7 @@ class FormController extends Controller
             ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
             : [];
 
-        $responseData = $this->emptyResponseData();
+        $responseStats = $this->responseStats();
 
         return view('forms.create', [
             'formData' => null,
@@ -75,9 +75,7 @@ class FormController extends Controller
             'formId' => null,
             'shareUrl' => null,
             'savedRules' => $savedRules,
-            'totalResponses' => $responseData['totalResponses'],
-            'questionSummaries' => $responseData['questionSummaries'],
-            'individualResponses' => $responseData['individualResponses'],
+            'responsesStats' => $responseStats,
         ]);
     }
 
@@ -175,7 +173,7 @@ class FormController extends Controller
             ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
             : [];
 
-        $responseData = $this->buildResponseData($form);
+        $responseStats = $this->responseStats($form, count($formData['questions'] ?? []));
 
         return view('forms.create', [
             'formData' => $formData,
@@ -185,9 +183,7 @@ class FormController extends Controller
             'formId' => $form->id,
             'shareUrl' => route('forms.public.show', $form),
             'savedRules' => $savedRules,
-            'totalResponses' => $responseData['totalResponses'],
-            'questionSummaries' => $responseData['questionSummaries'],
-            'individualResponses' => $responseData['individualResponses'],
+            'responsesStats' => $responseStats,
         ]);
     }
 
@@ -294,87 +290,31 @@ class FormController extends Controller
             abort(403);
         }
 
-        $form->load([
-            'questions' => function ($query) {
-                $query->with(['options' => function ($optionQuery) {
-                    $optionQuery->orderBy('order');
-                }])->orderBy('order');
-            },
-        ]);
-
-        $responses = $form->responses()
-            ->with(['answers.question', 'answers.questionOption'])
-            ->latest()
-            ->get();
-
-        $questionSummaries = $form->questions->map(function ($question) use ($responses) {
-            $answers = $responses->flatMap(function ($response) use ($question) {
-                return $response->answers->where('question_id', $question->id)->values();
-            });
-
-            $total = $answers->count();
-            $chart = null;
-            $textAnswers = null;
-
-            if (in_array($question->type, ['multiple-choice', 'dropdown', 'checkbox'])) {
-                $labels = [];
-                $counts = [];
-                foreach ($question->options as $option) {
-                    $labels[] = $option->text ?? 'Opsi';
-                    $counts[] = $answers->where('question_option_id', $option->id)->count();
-                }
-
-                $chartType = $question->type === 'checkbox' ? 'bar' : 'pie';
-                $chart = [
-                    'type' => $chartType,
-                    'labels' => $labels,
-                    'values' => $counts,
-                ];
-            } else {
-                $textAnswers = $answers->pluck('answer_text')->filter()->values()->take(50)->toArray();
-            }
-
-            return [
-                'id' => $question->id,
-                'title' => $question->title ?? 'Pertanyaan',
-                'type' => $question->type,
-                'total' => $total,
-                'chart' => $chart,
-                'text_answers' => $textAnswers,
-            ];
-        })->values();
-
-        $individualResponses = $responses->map(function ($response) {
-            return [
-                'id' => $response->id,
-                'submitted_at' => optional($response->created_at)->format('d M Y H:i'),
-                'email' => $response->email,
-                'total_score' => $response->total_score,
-                'result_text' => $response->result_text,
-                'answers' => $response->answers->map(function ($answer) {
-                    return [
-                        'question' => $answer->question->title ?? 'Pertanyaan',
-                        'value' => $answer->questionOption->text ?? $answer->answer_text,
-                    ];
-                })->values()->toArray(),
-            ];
-        })->values();
+        $responseData = $this->buildResponseData($form);
 
         return view('forms.responses', [
             'form' => $form,
-            'totalResponses' => $responses->count(),
-            'questionSummaries' => $questionSummaries,
-            'individualResponses' => $individualResponses,
+            'totalResponses' => $responseData['totalResponses'],
+            'questionSummaries' => collect($responseData['questionSummaries']),
+            'individualResponses' => collect($responseData['individualResponses']),
         ]);
     }
 
-    private function emptyResponseData(): array
+    /**
+     * Memberikan data jawaban untuk tab builder secara asinkron.
+     */
+    public function responsesData(Form $form)
     {
-        return [
-            'totalResponses' => 0,
-            'questionSummaries' => [],
-            'individualResponses' => [],
-        ];
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $data = $this->buildResponseData($form);
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
     }
 
     private function buildResponseData(Form $form): array
@@ -445,10 +385,35 @@ class FormController extends Controller
             ];
         })->values()->toArray();
 
+        $latestResponse = $responses->first();
+
         return [
             'totalResponses' => $responses->count(),
+            'latestResponseAt' => $latestResponse && $latestResponse->created_at
+                ? $latestResponse->created_at->format('d M Y H:i')
+                : null,
             'questionSummaries' => $questionSummaries,
             'individualResponses' => $individualResponses,
+        ];
+    }
+
+    private function responseStats(?Form $form = null, int $questionCount = 0): array
+    {
+        if (!$form || !$form->exists) {
+            return [
+                'total_responses' => 0,
+                'question_count' => $questionCount,
+                'latest_response_at' => null,
+            ];
+        }
+
+        $totalResponses = $form->responses()->count();
+        $latest = $form->responses()->latest('created_at')->value('created_at');
+
+        return [
+            'total_responses' => $totalResponses,
+            'question_count' => $questionCount,
+            'latest_response_at' => $latest ? $latest->format('d M Y H:i') : null,
         ];
     }
 

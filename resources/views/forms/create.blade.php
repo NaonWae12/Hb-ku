@@ -3,11 +3,20 @@
 @section('title', 'Formulir Baru - hb-ku')
 
 @section('content')
+@php
+    $responsesStats = $responsesStats ?? [
+        'total_responses' => 0,
+        'question_count' => 0,
+        'latest_response_at' => null,
+    ];
+@endphp
 <div class="min-h-screen bg-gray-50" id="form-builder-root"
     data-initial='@json($formData ?? null)'
     data-mode="{{ $formMode ?? 'create' }}"
     data-form-id="{{ $formId }}"
     data-share-url="{{ $shareUrl ?? '' }}"
+    data-responses-url="{{ $formId ? route('forms.responses.data', $formId) : '' }}"
+    data-total-responses="{{ $responsesStats['total_responses'] }}"
     data-saved-rules='@json($savedRules ?? [])'>
     <!-- Top Bar dengan tombol -->
     <div class="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -114,30 +123,22 @@
         </div>
 
         <!-- Tab Content: Jawaban -->
-        @php
-            $totalResponsesCount = $totalResponses ?? 0;
-            $questionSummariesCollection = collect($questionSummaries ?? []);
-            $individualResponsesCollection = collect($individualResponses ?? []);
-            $questionCount = $questionSummariesCollection->count();
-            $firstResponse = $individualResponsesCollection->first();
-            $latestResponseAt = $firstResponse['submitted_at'] ?? null;
-        @endphp
         <div id="tab-responses" class="tab-content hidden">
             <div class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
                         <p class="text-sm text-gray-500">Total Jawaban</p>
-                        <p class="text-3xl font-semibold text-gray-900 mt-1">{{ $totalResponsesCount }}</p>
+                        <p id="builder-total-responses" class="text-3xl font-semibold text-gray-900 mt-1">{{ $responsesStats['total_responses'] }}</p>
                         <p class="text-xs text-gray-500 mt-2">Jawaban yang sudah terkumpul</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
                         <p class="text-sm text-gray-500">Pertanyaan Aktif</p>
-                        <p class="text-3xl font-semibold text-gray-900 mt-1">{{ $questionCount }}</p>
+                        <p id="builder-question-count" class="text-3xl font-semibold text-gray-900 mt-1">{{ $responsesStats['question_count'] }}</p>
                         <p class="text-xs text-gray-500 mt-2">Pertanyaan yang ditampilkan ke responden</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
                         <p class="text-sm text-gray-500">Jawaban Terbaru</p>
-                        <p class="text-xl font-semibold text-gray-900 mt-1">{{ $latestResponseAt ?? 'Belum ada data' }}</p>
+                        <p id="builder-latest-response" class="text-xl font-semibold text-gray-900 mt-1">{{ $responsesStats['latest_response_at'] ?? 'Belum ada data' }}</p>
                         @if($formId)
                             <a href="{{ route('forms.responses', $formId) }}" class="inline-flex items-center text-sm font-medium text-red-600 hover:text-red-700 mt-3">
                                 Lihat halaman jawaban lengkap
@@ -173,72 +174,49 @@
 
                     <div class="px-6 pb-6">
                         <div id="builder-summary-panel" class="pt-6">
-                            @if($totalResponsesCount === 0)
+                            <div id="builder-summary-empty" class="{{ $responsesStats['total_responses'] > 0 ? 'hidden' : '' }}">
                                 <div class="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center">
                                     <p class="text-lg font-medium text-gray-900 mb-2">Belum ada jawaban</p>
                                     <p class="text-sm text-gray-500">Bagikan link form untuk mulai menerima jawaban responden.</p>
                                 </div>
-                            @else
-                                <div class="space-y-6">
-                                    @foreach($questionSummariesCollection as $summary)
-                                        <div class="border border-gray-100 rounded-xl p-5 shadow-sm">
-                                            <div class="flex items-start justify-between mb-4">
-                                                <div>
-                                                    <p class="text-xs text-gray-500 uppercase tracking-wide">Pertanyaan {{ $loop->iteration }}</p>
-                                                    <h3 class="text-lg font-semibold text-gray-900">{{ $summary['title'] }}</h3>
-                                                </div>
-                                                <span class="text-xs font-medium text-gray-600 bg-gray-100 px-3 py-1 rounded-full">{{ $summary['total'] }} jawaban</span>
-                                            </div>
-
-                                            @if(!empty($summary['chart']))
-                                                <div class="h-64">
-                                                    <canvas id="builder-chart-{{ $summary['id'] }}"></canvas>
-                                                </div>
-                                            @else
-                                                <div class="space-y-3">
-                                                    @if(!empty($summary['text_answers']))
-                                                        @foreach($summary['text_answers'] as $answer)
-                                                            <p class="p-3 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-700">{{ $answer }}</p>
-                                                        @endforeach
-                                                    @else
-                                                        <p class="text-sm text-gray-500">Belum ada jawaban untuk pertanyaan ini.</p>
-                                                    @endif
-                                                </div>
-                                            @endif
-                                        </div>
-                                    @endforeach
-                                </div>
-                            @endif
+                            </div>
+                            <div id="builder-summary-loading" class="hidden">
+                                <div class="border border-gray-100 rounded-xl p-6 text-sm text-gray-500 bg-gray-50">Memuat ringkasan jawaban...</div>
+                            </div>
+                            <div id="builder-summary-content" class="space-y-6 hidden"></div>
                         </div>
 
                         <div id="builder-individual-panel" class="pt-6 hidden">
-                            @if($totalResponsesCount === 0)
+                            <div id="builder-individual-empty" class="{{ $responsesStats['total_responses'] > 0 ? 'hidden' : '' }}">
                                 <div class="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center">
                                     <p class="text-lg font-medium text-gray-900 mb-2">Belum ada jawaban</p>
                                     <p class="text-sm text-gray-500">Setelah ada respons, Anda dapat menelusuri jawaban satu per satu di sini.</p>
                                 </div>
-                            @else
-                                <div class="space-y-6">
-                                    <div class="flex items-center justify-between border border-gray-100 rounded-xl p-5">
-                                        <div>
-                                            <p class="text-sm text-gray-500">Jawaban ke-<span id="builder-response-position">1</span> dari {{ $totalResponsesCount }}</p>
-                                            <p class="text-lg font-semibold text-gray-900" id="builder-response-email">-</p>
-                                            <p class="text-sm text-gray-500" id="builder-response-date">-</p>
-                                        </div>
-                                        <div class="text-right">
-                                            <p class="text-sm text-gray-500">Skor Total</p>
-                                            <p class="text-2xl font-bold text-gray-900" id="builder-response-score">-</p>
-                                        </div>
+                            </div>
+                            <div id="builder-individual-loading" class="hidden">
+                                <div class="border border-gray-100 rounded-xl p-6 text-sm text-gray-500 bg-gray-50">Memuat jawaban individu...</div>
+                            </div>
+                            <div id="builder-individual-content" class="space-y-6 hidden">
+                                <div class="flex items-center justify-between border border-gray-100 rounded-xl p-5">
+                                    <div>
+                                        <p class="text-sm text-gray-500">Jawaban ke-<span id="builder-response-position">1</span></p>
+                                        <p class="text-lg font-semibold text-gray-900" id="builder-response-email">-</p>
+                                        <p class="text-sm text-gray-500" id="builder-response-date">-</p>
                                     </div>
-
-                                    <div id="builder-response-answers" class="space-y-4"></div>
-
-                                    <div class="flex items-center justify-between pt-4 border-t border-gray-100">
-                                        <button id="builder-prev-response" class="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Sebelumnya</button>
-                                        <button id="builder-next-response" class="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Berikutnya</button>
+                                    <div class="text-right">
+                                        <p class="text-sm text-gray-500">Skor Total</p>
+                                        <p class="text-2xl font-bold text-gray-900" id="builder-response-score">-</p>
                                     </div>
                                 </div>
-                            @endif
+
+                                <div id="builder-response-answers" class="space-y-4"></div>
+
+                                <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+                                    <button id="builder-prev-response" class="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Sebelumnya</button>
+                                    <button id="builder-next-response" class="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Berikutnya</button>
+                                </div>
+                            </div>
+                            <div id="builder-responses-error" class="hidden mt-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl p-4"></div>
                         </div>
                     </div>
                 </div>
@@ -444,9 +422,6 @@
 @endsection
 
 @push('scripts')
-@if($totalResponsesCount > 0)
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-@endif
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const summaryTab = document.getElementById('builder-summary-tab');
@@ -479,125 +454,6 @@ document.addEventListener('DOMContentLoaded', function () {
     if (summaryShareBtn && headerShareBtn) {
         summaryShareBtn.addEventListener('click', () => headerShareBtn.click());
     }
-
-    @if($totalResponsesCount > 0)
-        const summaryData = @json($questionSummariesCollection->values());
-        summaryData.forEach((item) => {
-            if (!item.chart) {
-                return;
-            }
-
-            const canvas = document.getElementById(`builder-chart-${item.id}`);
-            if (!canvas) {
-                return;
-            }
-
-            const baseColors = ['#F87171', '#FBBF24', '#34D399', '#60A5FA', '#A78BFA', '#F472B6', '#F97316', '#2DD4BF'];
-            const colorSet = item.chart.values.map((_, idx) => baseColors[idx % baseColors.length]);
-
-            new Chart(canvas, {
-                type: item.chart.type,
-                data: {
-                    labels: item.chart.labels,
-                    datasets: [{
-                        label: 'Jumlah Jawaban',
-                        data: item.chart.values,
-                        backgroundColor: colorSet,
-                        borderColor: '#ffffff',
-                        borderWidth: 1,
-                    }],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                        },
-                    },
-                    scales: item.chart.type === 'bar' ? {
-                        y: {
-                            beginAtZero: true,
-                            ticks: { stepSize: 1 },
-                        },
-                    } : {},
-                },
-            });
-        });
-
-        const builderResponses = @json($individualResponsesCollection->values());
-        let builderResponseIndex = 0;
-
-        const positionEl = document.getElementById('builder-response-position');
-        const emailEl = document.getElementById('builder-response-email');
-        const dateEl = document.getElementById('builder-response-date');
-        const scoreEl = document.getElementById('builder-response-score');
-        const answersContainer = document.getElementById('builder-response-answers');
-        const prevBtn = document.getElementById('builder-prev-response');
-        const nextBtn = document.getElementById('builder-next-response');
-
-        function renderBuilderResponse(index) {
-            const data = builderResponses[index];
-            if (!data || !answersContainer) {
-                return;
-            }
-
-            if (positionEl) positionEl.textContent = index + 1;
-            if (emailEl) emailEl.textContent = data.email || 'Anonim';
-            if (dateEl) dateEl.textContent = data.submitted_at || '-';
-            if (scoreEl) scoreEl.textContent = data.total_score ?? '-';
-
-            answersContainer.innerHTML = '';
-            if (!data.answers.length) {
-                const empty = document.createElement('p');
-                empty.className = 'text-sm text-gray-500';
-                empty.textContent = 'Tidak ada jawaban yang tersedia.';
-                answersContainer.appendChild(empty);
-            } else {
-                data.answers.forEach((answer) => {
-                    const block = document.createElement('div');
-                    block.className = 'p-4 border border-gray-100 rounded-lg';
-
-                    const title = document.createElement('p');
-                    title.className = 'text-sm font-medium text-gray-900';
-                    title.textContent = answer.question;
-
-                    const value = document.createElement('p');
-                    value.className = 'mt-1 text-sm text-gray-700';
-                    value.textContent = answer.value || '-';
-
-                    block.appendChild(title);
-                    block.appendChild(value);
-                    answersContainer.appendChild(block);
-                });
-            }
-
-            if (prevBtn) prevBtn.disabled = index === 0;
-            if (nextBtn) nextBtn.disabled = index === builderResponses.length - 1;
-        }
-
-        if (prevBtn) {
-            prevBtn.addEventListener('click', () => {
-                if (builderResponseIndex > 0) {
-                    builderResponseIndex -= 1;
-                    renderBuilderResponse(builderResponseIndex);
-                }
-            });
-        }
-
-        if (nextBtn) {
-            nextBtn.addEventListener('click', () => {
-                if (builderResponseIndex < builderResponses.length - 1) {
-                    builderResponseIndex += 1;
-                    renderBuilderResponse(builderResponseIndex);
-                }
-            });
-        }
-
-        if (builderResponses.length > 0) {
-            renderBuilderResponse(0);
-        }
-    @endif
 });
 </script>
 @endpush

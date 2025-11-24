@@ -2,6 +2,8 @@
 console.log('Form Builder JS loaded');
 let questionCounter = 0;
 let sectionCounter = 0;
+let requestBuilderResponsesData = null;
+let chartJsLoadingPromise = null;
 
 function getMetaContent(name) {
     return document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
@@ -36,6 +38,31 @@ function resetFormRulesBuilder() {
     answerTemplateCounter = 0;
     resultRuleCounter = 0;
     updateRuleSaveControlsVisibility();
+}
+
+function ensureChartJsLoaded() {
+    if (window.Chart) {
+        return Promise.resolve();
+    }
+
+    if (!chartJsLoadingPromise) {
+        chartJsLoadingPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('Gagal memuat Chart.js'));
+            document.head.appendChild(script);
+        });
+    }
+
+    return chartJsLoadingPromise;
+}
+
+function triggerResponsesFetch() {
+    if (typeof requestBuilderResponsesData === 'function') {
+        requestBuilderResponsesData();
+    }
 }
 
 function hydrateRuleBuilderFromPreset(preset) {
@@ -513,7 +540,9 @@ function initTabs() {
             const targetContent = document.getElementById(`tab-${targetTab}`);
             if (targetContent) {
                 targetContent.classList.remove('hidden');
-                
+                if (targetTab === 'responses') {
+                    triggerResponsesFetch();
+                }
             }
         });
     });
@@ -983,6 +1012,350 @@ function gatherRulesFromSettings() {
     });
 }
 
+function setupBuilderResponses(options) {
+    const {
+        responsesUrl = '',
+        totalResponses = 0,
+    } = options || {};
+
+    const summaryEmpty = document.getElementById('builder-summary-empty');
+    const summaryLoading = document.getElementById('builder-summary-loading');
+    const summaryContent = document.getElementById('builder-summary-content');
+    const individualEmpty = document.getElementById('builder-individual-empty');
+    const individualLoading = document.getElementById('builder-individual-loading');
+    const individualContent = document.getElementById('builder-individual-content');
+    const responsesError = document.getElementById('builder-responses-error');
+    const totalResponsesEl = document.getElementById('builder-total-responses');
+    const latestResponseEl = document.getElementById('builder-latest-response');
+    const questionCountEl = document.getElementById('builder-question-count');
+    const positionEl = document.getElementById('builder-response-position');
+    const emailEl = document.getElementById('builder-response-email');
+    const dateEl = document.getElementById('builder-response-date');
+    const scoreEl = document.getElementById('builder-response-score');
+    const answersContainer = document.getElementById('builder-response-answers');
+    const prevBtn = document.getElementById('builder-prev-response');
+    const nextBtn = document.getElementById('builder-next-response');
+
+    if (!responsesUrl || totalResponses === 0) {
+        requestBuilderResponsesData = null;
+        return;
+    }
+
+    let responsesLoaded = false;
+    let responsesLoading = false;
+    let summaryData = [];
+    let individualData = [];
+    let currentResponseIndex = 0;
+
+    function setLoadingState(isLoading) {
+        if (isLoading) {
+            summaryLoading?.classList.remove('hidden');
+            individualLoading?.classList.remove('hidden');
+            summaryContent?.classList.add('hidden');
+            individualContent?.classList.add('hidden');
+            responsesError?.classList.add('hidden');
+        } else {
+            summaryLoading?.classList.add('hidden');
+            individualLoading?.classList.add('hidden');
+        }
+    }
+
+    function showError(message) {
+        if (responsesError) {
+            responsesError.textContent = message;
+            responsesError.classList.remove('hidden');
+        }
+    }
+
+    function hideError() {
+        responsesError?.classList.add('hidden');
+    }
+
+    function updateOverviewFromData(data) {
+        if (typeof data.totalResponses === 'number' && totalResponsesEl) {
+            totalResponsesEl.textContent = data.totalResponses;
+        }
+        if (Array.isArray(data.questionSummaries) && questionCountEl) {
+            questionCountEl.textContent = data.questionSummaries.length;
+        }
+        if (latestResponseEl) {
+            const latest = data.latestResponseAt
+                || (Array.isArray(data.individualResponses) && data.individualResponses[0]
+                    ? data.individualResponses[0].submitted_at
+                    : null);
+            latestResponseEl.textContent = latest || latestResponseEl.textContent || 'Belum ada data';
+        }
+    }
+
+    function renderSummaryCards(items) {
+        if (!summaryContent) {
+            return;
+        }
+
+        summaryContent.innerHTML = '';
+
+        if (!items.length) {
+            summaryContent.classList.add('hidden');
+            summaryEmpty?.classList.remove('hidden');
+            return;
+        }
+
+        summaryEmpty?.classList.add('hidden');
+        summaryContent.classList.remove('hidden');
+
+        const chartItems = [];
+        const colors = ['#F87171', '#FBBF24', '#34D399', '#60A5FA', '#A78BFA', '#F472B6', '#F97316', '#2DD4BF'];
+
+        items.forEach((item, index) => {
+            const card = document.createElement('div');
+            card.className = 'border border-gray-100 rounded-xl p-5 shadow-sm';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-start justify-between mb-4';
+
+            const headerLeft = document.createElement('div');
+            const label = document.createElement('p');
+            label.className = 'text-xs text-gray-500 uppercase tracking-wide';
+            label.textContent = `Pertanyaan ${index + 1}`;
+            const title = document.createElement('h3');
+            title.className = 'text-lg font-semibold text-gray-900';
+            title.textContent = item.title || 'Pertanyaan';
+            headerLeft.appendChild(label);
+            headerLeft.appendChild(title);
+
+            const totalPill = document.createElement('span');
+            totalPill.className = 'text-xs font-medium text-gray-600 bg-gray-100 px-3 py-1 rounded-full';
+            totalPill.textContent = `${item.total ?? 0} jawaban`;
+
+            header.appendChild(headerLeft);
+            header.appendChild(totalPill);
+            card.appendChild(header);
+
+            if (item.chart) {
+                const chartWrapper = document.createElement('div');
+                chartWrapper.className = 'h-64';
+                const canvas = document.createElement('canvas');
+                canvas.id = `builder-chart-${item.id}`;
+                chartWrapper.appendChild(canvas);
+                card.appendChild(chartWrapper);
+                chartItems.push({ item, canvasId: canvas.id, colors });
+            } else {
+                const answersWrapper = document.createElement('div');
+                answersWrapper.className = 'space-y-3';
+                if (Array.isArray(item.text_answers) && item.text_answers.length) {
+                    item.text_answers.forEach((answerText) => {
+                        const answerEl = document.createElement('p');
+                        answerEl.className = 'p-3 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-700';
+                        answerEl.textContent = answerText;
+                        answersWrapper.appendChild(answerEl);
+                    });
+                } else {
+                    const emptyEl = document.createElement('p');
+                    emptyEl.className = 'text-sm text-gray-500';
+                    emptyEl.textContent = 'Belum ada jawaban untuk pertanyaan ini.';
+                    answersWrapper.appendChild(emptyEl);
+                }
+                card.appendChild(answersWrapper);
+            }
+
+            summaryContent.appendChild(card);
+        });
+
+        if (chartItems.length) {
+            ensureChartJsLoaded()
+                .then(() => {
+                    chartItems.forEach(({ item, canvasId, colors: baseColors }) => {
+                        const canvas = document.getElementById(canvasId);
+                        if (!canvas || !window.Chart || !item.chart) {
+                            return;
+                        }
+                        const datasetColors = item.chart.values.map((_, idx) => baseColors[idx % baseColors.length]);
+                        new Chart(canvas, {
+                            type: item.chart.type,
+                            data: {
+                                labels: item.chart.labels,
+                                datasets: [{
+                                    label: 'Jumlah Jawaban',
+                                    data: item.chart.values,
+                                    backgroundColor: datasetColors,
+                                    borderColor: '#ffffff',
+                                    borderWidth: 1,
+                                }],
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        position: 'bottom',
+                                    },
+                                },
+                                scales: item.chart.type === 'bar'
+                                    ? {
+                                        y: {
+                                            beginAtZero: true,
+                                            ticks: { stepSize: 1 },
+                                        },
+                                    }
+                                    : {},
+                            },
+                        });
+                    });
+                })
+                .catch((error) => {
+                    console.error(error);
+                    showError('Grafik tidak dapat ditampilkan.');
+                });
+        }
+    }
+
+    function renderIndividualResponse(index) {
+        if (!answersContainer) {
+            return;
+        }
+        const data = individualData[index];
+        if (!data) {
+            return;
+        }
+
+        if (positionEl) {
+            positionEl.textContent = index + 1;
+        }
+        if (emailEl) {
+            emailEl.textContent = data.email || 'Anonim';
+        }
+        if (dateEl) {
+            dateEl.textContent = data.submitted_at || '-';
+        }
+        if (scoreEl) {
+            scoreEl.textContent = data.total_score ?? '-';
+        }
+
+        answersContainer.innerHTML = '';
+        if (!Array.isArray(data.answers) || !data.answers.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-sm text-gray-500';
+            empty.textContent = 'Tidak ada jawaban yang tersedia.';
+            answersContainer.appendChild(empty);
+        } else {
+            data.answers.forEach((answer) => {
+                const block = document.createElement('div');
+                block.className = 'p-4 border border-gray-100 rounded-lg';
+
+                const title = document.createElement('p');
+                title.className = 'text-sm font-medium text-gray-900';
+                title.textContent = answer.question || 'Pertanyaan';
+
+                const value = document.createElement('p');
+                value.className = 'mt-1 text-sm text-gray-700';
+                value.textContent = answer.value || '-';
+
+                block.appendChild(title);
+                block.appendChild(value);
+                answersContainer.appendChild(block);
+            });
+        }
+
+        if (prevBtn) {
+            prevBtn.disabled = index === 0;
+        }
+        if (nextBtn) {
+            nextBtn.disabled = index === individualData.length - 1;
+        }
+    }
+
+    function initializeIndividualSection() {
+        if (!individualContent) {
+            return;
+        }
+
+        if (!individualData.length) {
+            individualContent.classList.add('hidden');
+            individualEmpty?.classList.remove('hidden');
+            return;
+        }
+
+        individualEmpty?.classList.add('hidden');
+        individualContent.classList.remove('hidden');
+        currentResponseIndex = 0;
+        renderIndividualResponse(currentResponseIndex);
+    }
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (currentResponseIndex > 0) {
+                currentResponseIndex -= 1;
+                renderIndividualResponse(currentResponseIndex);
+            }
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            if (currentResponseIndex < individualData.length - 1) {
+                currentResponseIndex += 1;
+                renderIndividualResponse(currentResponseIndex);
+            }
+        });
+    }
+
+    requestBuilderResponsesData = async function () {
+        if (responsesLoaded || responsesLoading) {
+            return;
+        }
+
+        responsesLoading = true;
+        hideError();
+        setLoadingState(true);
+
+        try {
+            const response = await fetch(responsesUrl, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error('Gagal memuat data jawaban.');
+            }
+
+            const payload = await response.json();
+            if (!payload.success || !payload.data) {
+                throw new Error(payload.message || 'Gagal memuat data jawaban.');
+            }
+
+            const data = payload.data;
+            summaryData = Array.isArray(data.questionSummaries) ? data.questionSummaries : [];
+            individualData = Array.isArray(data.individualResponses) ? data.individualResponses : [];
+
+            updateOverviewFromData(data);
+
+            if (summaryData.length) {
+                renderSummaryCards(summaryData);
+            } else {
+                summaryContent?.classList.add('hidden');
+                summaryEmpty?.classList.remove('hidden');
+            }
+
+            if (individualData.length) {
+                initializeIndividualSection();
+            } else {
+                individualContent?.classList.add('hidden');
+                individualEmpty?.classList.remove('hidden');
+            }
+
+            responsesLoaded = true;
+        } catch (error) {
+            console.error(error);
+            showError(error.message || 'Tidak dapat memuat data jawaban.');
+        } finally {
+            responsesLoading = false;
+            setLoadingState(false);
+        }
+    };
+}
+
 function applySavedRuleToQuestion(questionCard, savedRule) {
     if (!questionCard || !savedRule) {
         return;
@@ -1186,6 +1559,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const shareLinkBtn = document.getElementById('share-link-btn');
     let shareLinkUrl = rootElement?.getAttribute('data-share-url') || '';
     const rulePresetUrl = getMetaContent('rule-preset-url') || '';
+    const responsesDataUrl = rootElement?.getAttribute('data-responses-url') || '';
+    const totalResponsesHint = Number(rootElement?.getAttribute('data-total-responses') || '0');
 
     if (rootElement) {
         const initialAttr = rootElement.getAttribute('data-initial');
@@ -1259,6 +1634,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     updateRuleSaveControlsVisibility();
+    setupBuilderResponses({
+        responsesUrl: responsesDataUrl,
+        totalResponses: totalResponsesHint,
+    });
     
     // Initialize answer templates
     const addAnswerTemplateBtn = document.getElementById('add-answer-template-btn');
