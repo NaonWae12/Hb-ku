@@ -45,4 +45,9 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    public function formRulePresets()
+    {
+        return $this->hasMany(FormRulePreset::class);
+    }
 }

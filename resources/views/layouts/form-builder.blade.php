@@ -10,6 +10,7 @@
     <meta name="form-mode" content="{{ $formMode ?? 'create' }}">
     <meta name="form-id" content="{{ $formId ?? '' }}">
     <meta name="dashboard-url" content="{{ route('dashboard') }}">
+    <meta name="rule-preset-url" content="{{ route('form-rule-presets.store') }}">
     <title>@yield('title', 'hb-ku')</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @vite('resources/js/form-builder.js')

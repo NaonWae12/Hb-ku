@@ -61,6 +61,10 @@ class FormController extends Controller
      */
     public function create()
     {
+        $savedRules = auth()->check()
+            ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
+            : [];
+
         return view('forms.create', [
             'formData' => null,
             'formMode' => 'create',
@@ -68,6 +72,7 @@ class FormController extends Controller
             'saveFormMethod' => 'POST',
             'formId' => null,
             'shareUrl' => null,
+            'savedRules' => $savedRules,
         ]);
     }
 
@@ -161,6 +166,10 @@ class FormController extends Controller
 
         $formData = $this->prepareFormBuilderData($form);
 
+        $savedRules = auth()->check()
+            ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
+            : [];
+
         return view('forms.create', [
             'formData' => $formData,
             'formMode' => 'edit',
@@ -168,6 +177,7 @@ class FormController extends Controller
             'saveFormMethod' => 'PUT',
             'formId' => $form->id,
             'shareUrl' => route('forms.public.show', $form),
+            'savedRules' => $savedRules,
         ]);
     }
 

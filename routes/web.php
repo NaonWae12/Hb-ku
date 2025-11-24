@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\FormController;
+use App\Http\Controllers\FormRulePresetController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicFormController;
 use Illuminate\Support\Facades\Route;
@@ -25,6 +26,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/forms', [FormController::class, 'store'])->name('forms.store');
     Route::put('/forms/{form}', [FormController::class, 'update'])->name('forms.update');
     Route::delete('/forms/{form}', [FormController::class, 'destroy'])->name('forms.destroy');
+    Route::post('/form-rule-presets', [FormRulePresetController::class, 'store'])->name('form-rule-presets.store');
 });
 
 require __DIR__.'/auth.php';

@@ -7,7 +7,8 @@
     data-initial='@json($formData ?? null)'
     data-mode="{{ $formMode ?? 'create' }}"
     data-form-id="{{ $formId }}"
-    data-share-url="{{ $shareUrl ?? '' }}">
+    data-share-url="{{ $shareUrl ?? '' }}"
+    data-saved-rules='@json($savedRules ?? [])'>
     <!-- Top Bar dengan tombol -->
     <div class="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

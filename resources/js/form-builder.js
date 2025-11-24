@@ -14,6 +14,30 @@ function setMetaContent(name, value) {
     }
 }
 
+function getAnswerTemplatesPlaceholder() {
+    return '<div class="answer-templates-placeholder text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+}
+
+function getResultRulesPlaceholder() {
+    return '<div class="result-rules-placeholder text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
+}
+
+function resetFormRulesBuilder() {
+    const answerTemplatesContainer = document.getElementById('answer-templates-container');
+    if (answerTemplatesContainer) {
+        answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
+    }
+
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    if (resultRulesContainer) {
+        resultRulesContainer.innerHTML = getResultRulesPlaceholder();
+    }
+
+    answerTemplateCounter = 0;
+    resultRuleCounter = 0;
+    updateRuleSaveControlsVisibility();
+}
+
 // Fungsi untuk membuat section divider
 function createSectionDivider() {
     sectionCounter++;
@@ -283,32 +307,72 @@ function createQuestionCard(type = 'short-answer') {
                 </div>
 
                 <!-- Bottom Actions -->
-                <div class="mt-4 flex items-center justify-between pt-4 border-t border-gray-200">
-                    <div class="flex items-center space-x-2">
-                        <button class="duplicate-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Duplikat">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                            </svg>
-                        </button>
-                        <button class="delete-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                            </svg>
-                        </button>
+                <div class="mt-4 space-y-4 pt-4 border-t border-gray-200">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <button class="duplicate-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Duplikat">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                </svg>
+                            </button>
+                            <button class="delete-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer">
+                                <input type="checkbox" class="required-checkbox sr-only">
+                                <div class="toggle-switch relative w-11 h-6 bg-gray-300 rounded-full transition-colors duration-200 ease-in-out">
+                                    <div class="toggle-switch-handle absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform duration-200 ease-in-out shadow-sm"></div>
+                                </div>
+                                <span class="select-none">Wajib diisi</span>
+                            </label>
+                            <button class="more-options-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Setelan pertanyaan">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-4">
-                        <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer">
-                            <input type="checkbox" class="required-checkbox sr-only">
-                            <div class="toggle-switch relative w-11 h-6 bg-gray-300 rounded-full transition-colors duration-200 ease-in-out">
-                                <div class="toggle-switch-handle absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform duration-200 ease-in-out shadow-sm"></div>
+
+                    <div class="question-advanced-settings hidden bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-4">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Validasi Jawaban</p>
+                                <p class="text-xs text-gray-500 mt-1">Gunakan regex sederhana untuk memvalidasi jawaban.</p>
                             </div>
-                            <span class="select-none">Wajib diisi</span>
-                        </label>
-                        <button class="more-options-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Opsi lainnya">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path>
-                            </svg>
-                        </button>
+                            <input type="text" class="question-validation-input mt-2 sm:mt-0 sm:max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="contoh: ^[0-9]+$">
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Pesan Validasi</p>
+                                <p class="text-xs text-gray-500 mt-1">Tampilkan pesan kustom saat jawaban tidak valid.</p>
+                            </div>
+                            <input type="text" class="question-validation-message mt-2 sm:mt-0 sm:max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Silakan masukkan angka saja">
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Deskripsi Tambahan</p>
+                                <p class="text-xs text-gray-500 mt-1">Sampaikan petunjuk tambahan untuk pertanyaan ini.</p>
+                            </div>
+                            <textarea rows="2" class="question-extra-notes mt-2 sm:mt-0 sm:max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Contoh: Gunakan format tanggal dd/mm/yyyy"></textarea>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Batas Karakter (opsional)</p>
+                                <p class="text-xs text-gray-500 mt-1">Tentukan batas minimal & maksimal untuk jawaban teks.</p>
+                            </div>
+                            <div class="flex items-center space-x-2 mt-2 sm:mt-0">
+                                <input type="number" min="0" class="question-min-length w-24 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Min">
+                                <span class="text-sm text-gray-500">s.d</span>
+                                <input type="number" min="0" class="question-max-length w-24 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Maks">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -997,6 +1061,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let saveFormMethod = (getMetaContent('save-form-method') || 'POST').toUpperCase();
     const shareLinkBtn = document.getElementById('share-link-btn');
     let shareLinkUrl = rootElement?.getAttribute('data-share-url') || '';
+    const rulePresetUrl = getMetaContent('rule-preset-url') || '';
 
     if (rootElement) {
         const initialAttr = rootElement.getAttribute('data-initial');
@@ -1009,6 +1074,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         formMode = rootElement.getAttribute('data-mode') || 'create';
+
+        const savedRulesAttr = rootElement.getAttribute('data-saved-rules');
+        if (savedRulesAttr) {
+            try {
+                const parsedSavedRules = JSON.parse(savedRulesAttr) || [];
+                saveRulesToState(parsedSavedRules);
+            } catch (error) {
+                console.error('Failed to parse saved rules data:', error);
+            }
+        }
     }
 
     const updateShareButtonVisibility = () => {
@@ -1067,7 +1142,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (addAnswerTemplateBtn && answerTemplatesContainer) {
         addAnswerTemplateBtn.addEventListener('click', function() {
-            if (answerTemplatesContainer.querySelector('.text-gray-500')) {
+            if (answerTemplatesContainer.querySelector('.answer-templates-placeholder')) {
                 answerTemplatesContainer.innerHTML = '';
             }
             const templateCard = createAnswerTemplateCard();
@@ -1079,7 +1154,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 deleteBtn.addEventListener('click', function() {
                     templateCard.remove();
                     if (answerTemplatesContainer.children.length === 0) {
-                        answerTemplatesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+                        answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
                     }
                     updateRuleSaveControlsVisibility();
                 });
@@ -1089,18 +1164,54 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const saveRulesBtn = document.getElementById('save-form-rules-btn');
     if (saveRulesBtn) {
-        saveRulesBtn.addEventListener('click', function() {
+        saveRulesBtn.addEventListener('click', async function() {
             const bundle = gatherRulesFromSettings();
             if (!bundle) {
                 alert('Tambahkan terlebih dahulu Template Jawaban & Skor untuk menyimpan aturan.');
                 return;
             }
-            const existing = loadSavedRules();
-            existing.push(bundle);
-            saveRulesToState(existing);
-            renderSavedRulesChips();
-            updateUseRuleButtonsVisibility();
-            alert('Aturan berhasil disimpan.');
+
+            if (!rulePresetUrl) {
+                alert('Endpoint penyimpanan aturan tidak tersedia.');
+                return;
+            }
+
+            saveRulesBtn.disabled = true;
+            saveRulesBtn.textContent = 'Menyimpan...';
+
+            try {
+                const response = await fetch(rulePresetUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        templates: bundle.templates ?? [],
+                        result_rules: bundle.result_rules ?? [],
+                    }),
+                });
+
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || 'Gagal menyimpan aturan.');
+                }
+
+                saveRulesToState(data.presets || []);
+                renderSavedRulesChips();
+                updateUseRuleButtonsVisibility();
+                resetFormRulesBuilder();
+                alert(data.message || 'Aturan berhasil disimpan.');
+            } catch (error) {
+                console.error(error);
+                alert(error.message || 'Terjadi kesalahan saat menyimpan aturan.');
+            } finally {
+                saveRulesBtn.disabled = false;
+                saveRulesBtn.textContent = 'Simpan Aturan';
+            }
         });
     }
 
@@ -1113,7 +1224,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (addResultRuleBtn && resultRulesContainer) {
         addResultRuleBtn.addEventListener('click', function() {
-            if (resultRulesContainer.querySelector('.text-gray-500')) {
+            if (resultRulesContainer.querySelector('.result-rules-placeholder')) {
                 resultRulesContainer.innerHTML = '';
             }
             const ruleCard = createResultRuleCard();
@@ -1124,7 +1235,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 deleteBtn.addEventListener('click', function() {
                     ruleCard.remove();
                     if (resultRulesContainer.children.length === 0) {
-                        resultRulesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
+                        resultRulesContainer.innerHTML = getResultRulesPlaceholder();
                     }
                     renderSavedRulesChips();
                     updateUseRuleButtonsVisibility();
@@ -1322,6 +1433,16 @@ function attachQuestionCardEvents(card) {
         });
     }
     
+    // More options panel
+    const moreOptionsBtn = card.querySelector('.more-options-btn');
+    const advancedSettings = card.querySelector('.question-advanced-settings');
+    if (moreOptionsBtn && advancedSettings) {
+        moreOptionsBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            advancedSettings.classList.toggle('hidden');
+        });
+    }
+
     // Question type dropdown
     const typeDropdownBtn = card.querySelector('.question-type-dropdown-btn');
     const typeDropdown = card.querySelector('.question-type-dropdown');
@@ -1776,13 +1897,39 @@ function collectFormData() {
             return;
         }
 
+        const extraSettingsPayload = {
+            validation: questionCard.querySelector('.question-validation-input')?.value?.trim() || null,
+            validation_message: questionCard.querySelector('.question-validation-message')?.value?.trim() || null,
+            extra_notes: questionCard.querySelector('.question-extra-notes')?.value?.trim() || null,
+            min_length: questionCard.querySelector('.question-min-length')?.value || null,
+            max_length: questionCard.querySelector('.question-max-length')?.value || null,
+        };
+
+        if (extraSettingsPayload.min_length !== null && extraSettingsPayload.min_length !== '') {
+            extraSettingsPayload.min_length = parseInt(extraSettingsPayload.min_length, 10);
+        } else {
+            extraSettingsPayload.min_length = null;
+        }
+
+        if (extraSettingsPayload.max_length !== null && extraSettingsPayload.max_length !== '') {
+            extraSettingsPayload.max_length = parseInt(extraSettingsPayload.max_length, 10);
+        } else {
+            extraSettingsPayload.max_length = null;
+        }
+
         const questionData = {
             type: questionCard.getAttribute('data-question-type') || 'short-answer',
             title: questionCard.querySelector('.question-title')?.value || '',
             description: questionCard.querySelector('.question-description')?.value || '',
             is_required: questionCard.querySelector('.required-checkbox')?.checked || false,
-            options: []
+            options: [],
+            extra_settings: extraSettingsPayload,
         };
+
+        const extraValues = Object.values(questionData.extra_settings);
+        if (extraValues.every(value => value === null || value === '')) {
+            delete questionData.extra_settings;
+        }
 
         if (currentSectionIndex >= 0) {
             questionData.section_id = currentSectionIndex;
@@ -2029,7 +2176,7 @@ function populateFormBuilder(data) {
         const templates = Array.isArray(data.answer_templates) ? data.answer_templates : [];
 
         if (templates.length === 0) {
-            answerTemplatesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+            answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
             updateRuleSaveControlsVisibility();
         } else {
             templates.forEach((template) => {
@@ -2050,7 +2197,7 @@ function populateFormBuilder(data) {
                     deleteBtn.addEventListener('click', function () {
                         templateCard.remove();
                         if (answerTemplatesContainer.children.length === 0) {
-                            answerTemplatesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+                            answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
                         }
                         updateRuleSaveControlsVisibility();
                     });
@@ -2066,7 +2213,7 @@ function populateFormBuilder(data) {
         const rules = Array.isArray(data.result_rules) ? data.result_rules : [];
 
         if (rules.length === 0) {
-            resultRulesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
+            resultRulesContainer.innerHTML = getResultRulesPlaceholder();
         } else {
             rules.forEach((rule) => {
                 const ruleCard = createResultRuleCard();
@@ -2119,7 +2266,7 @@ function populateFormBuilder(data) {
                     deleteRuleBtn.addEventListener('click', function () {
                         ruleCard.remove();
                         if (resultRulesContainer.children.length === 0) {
-                            resultRulesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
+                            resultRulesContainer.innerHTML = getResultRulesPlaceholder();
                         }
                     });
                 }
@@ -2188,6 +2335,41 @@ function populateFormBuilder(data) {
         } else if (questionImage && imageArea) {
             questionImage.removeAttribute('src');
             imageArea.classList.add('hidden');
+        }
+
+        const extraSettings = questionData.extra_settings || {};
+        const validationInput = questionCard.querySelector('.question-validation-input');
+        const validationMessageInput = questionCard.querySelector('.question-validation-message');
+        const extraNotesInput = questionCard.querySelector('.question-extra-notes');
+        const minLengthInput = questionCard.querySelector('.question-min-length');
+        const maxLengthInput = questionCard.querySelector('.question-max-length');
+        const advancedSettingsPanel = questionCard.querySelector('.question-advanced-settings');
+
+        const hasExtraSettings = [
+            extraSettings.validation,
+            extraSettings.validation_message,
+            extraSettings.extra_notes,
+            extraSettings.min_length,
+            extraSettings.max_length,
+        ].some(value => value !== null && value !== undefined && value !== '');
+
+        if (validationInput && extraSettings.validation) {
+            validationInput.value = extraSettings.validation;
+        }
+        if (validationMessageInput && extraSettings.validation_message) {
+            validationMessageInput.value = extraSettings.validation_message;
+        }
+        if (extraNotesInput && extraSettings.extra_notes) {
+            extraNotesInput.value = extraSettings.extra_notes;
+        }
+        if (minLengthInput && extraSettings.min_length !== null && extraSettings.min_length !== undefined) {
+            minLengthInput.value = extraSettings.min_length;
+        }
+        if (maxLengthInput && extraSettings.max_length !== null && extraSettings.max_length !== undefined) {
+            maxLengthInput.value = extraSettings.max_length;
+        }
+        if (hasExtraSettings && advancedSettingsPanel) {
+            advancedSettingsPanel.classList.remove('hidden');
         }
 
         if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionType)) {
