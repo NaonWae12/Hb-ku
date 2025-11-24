@@ -29,6 +29,27 @@ function getResultRulesPlaceholder() {
     return '<div class="result-rules-placeholder text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
 }
 
+// Function to update main buttons visibility
+function updateMainButtonsVisibility() {
+    const addQuestionBtn = document.getElementById('add-question-btn');
+    const addSectionBtn = document.getElementById('add-section-btn');
+    const buttonsContainer = addQuestionBtn?.parentElement;
+    const questionsContainer = document.getElementById('questions-container');
+    
+    if (!questionsContainer) return;
+    
+    const questionCards = questionsContainer.querySelectorAll('.question-card');
+    const hasQuestions = questionCards.length > 0;
+    
+    if (buttonsContainer) {
+        if (hasQuestions) {
+            buttonsContainer.classList.add('hidden');
+        } else {
+            buttonsContainer.classList.remove('hidden');
+        }
+    }
+}
+
 function resetFormRulesBuilder() {
     const answerTemplatesContainer = document.getElementById('answer-templates-container');
     if (answerTemplatesContainer) {
@@ -235,11 +256,74 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
             container.appendChild(sectionDivider);
 
             const sectionInfo = sectionList[currentSectionIndex] || null;
-            const sectionTitleEl = sectionDivider.querySelector('.section-title');
-            if (sectionTitleEl) {
-                sectionTitleEl.textContent = sectionInfo && sectionInfo.title
+            const sectionTitleInput = sectionDivider.querySelector('.section-title-input');
+            const sectionDescInput = sectionDivider.querySelector('.section-description-input');
+            const sectionImage = sectionDivider.querySelector('.section-image');
+            const sectionImageArea = sectionDivider.querySelector('.section-image-area');
+            const sectionImageValueInput = sectionDivider.querySelector('.section-image-value');
+            const sectionImageSettings = sectionDivider.querySelector('.section-image-settings');
+            const sectionAlignmentSelect = sectionDivider.querySelector('.section-image-alignment-select');
+            const sectionWrapModeSelect = sectionDivider.querySelector('.section-image-wrap-mode-select');
+            
+            if (sectionTitleInput) {
+                sectionTitleInput.value = sectionInfo && sectionInfo.title
                     ? sectionInfo.title
                     : `Bagian ${currentSectionIndex + 1}`;
+            }
+            
+            if (sectionDescInput && sectionInfo && sectionInfo.description) {
+                sectionDescInput.value = sectionInfo.description;
+            }
+            
+            // Handle section image
+            const existingImageSrc = sectionInfo?.image_url || sectionInfo?.image || '';
+            const existingImagePath = sectionInfo?.image || '';
+            
+            if (existingImageSrc && sectionImage && sectionImageArea) {
+                sectionImage.src = existingImageSrc;
+                sectionImageArea.classList.remove('hidden');
+                sectionImageSettings?.classList.remove('hidden');
+            }
+            
+            if (sectionImageValueInput) {
+                let imagePath = existingImagePath;
+                if (imagePath && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
+                    try {
+                        const urlPath = new URL(imagePath).pathname;
+                        imagePath = urlPath.startsWith('/') ? urlPath.substring(1) : urlPath;
+                    } catch (e) {
+                        const match = imagePath.match(/\/storage\/.+$/);
+                        if (match) {
+                            imagePath = match[0].substring(1);
+                        }
+                    }
+                }
+                sectionImageValueInput.value = imagePath || '';
+            }
+            
+            if (sectionAlignmentSelect) {
+                sectionAlignmentSelect.value = sectionInfo?.image_alignment ?? 'center';
+            }
+            
+            if (sectionWrapModeSelect) {
+                sectionWrapModeSelect.value = sectionInfo?.image_wrap_mode ?? 'fixed';
+            }
+            
+            // Attach section events (this will set up updateImageStyle function and event listeners)
+            attachSectionEvents(sectionDivider);
+            
+            // Apply image style after loading - trigger change event to apply style
+            if (existingImageSrc && sectionImage) {
+                // Wait a bit for attachSectionEvents to finish setting up
+                setTimeout(() => {
+                    // Trigger change events to apply style
+                    if (sectionAlignmentSelect) {
+                        sectionAlignmentSelect.dispatchEvent(new Event('change'));
+                    }
+                    if (sectionWrapModeSelect) {
+                        sectionWrapModeSelect.dispatchEvent(new Event('change'));
+                    }
+                }, 50);
             }
 
             const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
@@ -247,6 +331,7 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
                 deleteBtn.addEventListener('click', function () {
                     sectionDivider.remove();
                     updateSectionNumbers();
+                    updateMainButtonsVisibility();
                 });
             }
         }
@@ -550,34 +635,435 @@ function hydrateRuleBuilderFromPreset(preset) {
 function createSectionDivider() {
     sectionCounter++;
     const sectionDivider = document.createElement('div');
-    sectionDivider.className = 'section-divider bg-white rounded-lg shadow-sm border-2 border-dashed border-gray-300 p-6 my-6';
+    sectionDivider.className = 'section-divider bg-white rounded-lg shadow-sm border-2 border-dashed border-gray-300 p-6 my-6 group';
     sectionDivider.setAttribute('data-section-id', sectionCounter);
     sectionDivider.innerHTML = `
-        <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <button type="button" class="drag-handle p-2 text-gray-400 hover:text-red-600 rounded-full bg-white/80 shadow cursor-grab focus:outline-none" data-drag-handle>
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M3 12h18M3 6h18M3 18h18"></path>
-                    </svg>
-                </button>
-                <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                    <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                    </svg>
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <div class="flex items-center space-x-3 mb-4">
+                    <button type="button" class="drag-handle p-2 text-gray-400 hover:text-red-600 rounded-full bg-white/80 shadow cursor-grab focus:outline-none" data-drag-handle>
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M3 12h18M3 6h18M3 18h18"></path>
+                        </svg>
+                    </button>
+                    <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <input 
+                            type="text" 
+                            placeholder="Judul Bagian" 
+                            class="section-title-input w-full text-lg font-medium text-gray-900 border-none outline-none focus:ring-0 placeholder-gray-400 pb-1 border-b-2 border-transparent focus:border-red-600 transition-colors"
+                            value="Bagian ${sectionCounter}"
+                        >
+                        <textarea 
+                            placeholder="Deskripsi bagian (opsional)" 
+                            rows="2"
+                            class="section-description-input w-full mt-2 text-sm text-gray-500 border-none outline-none focus:ring-0 placeholder-gray-400 pb-1 border-b border-transparent focus:border-red-600 transition-colors resize-none"
+                        ></textarea>
+                    </div>
                 </div>
-                <div>
-                    <h3 class="text-lg font-medium text-gray-900 section-title">Bagian ${sectionCounter}</h3>
-                    <p class="text-sm text-gray-500">Pertanyaan di bawah ini akan ditampilkan di halaman terpisah</p>
+                
+                <!-- Image Display Area -->
+                <div class="section-image-area mb-4 hidden">
+                    <div class="relative inline-block">
+                        <img src="" alt="Section image" class="max-w-full h-auto rounded-lg border border-gray-200 section-image" style="max-height: 300px;">
+                        <button class="remove-section-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Hidden File Input -->
+                <input type="file" accept="image/*" class="hidden section-image-file-input" data-section-id="${sectionCounter}">
+                <input type="hidden" class="section-image-value">
+                
+                <!-- Image Settings -->
+                <div class="section-image-settings hidden mt-4 space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Posisi gambar</label>
+                        <select class="section-image-alignment-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Wrapping gambar</label>
+                        <select class="section-image-wrap-mode-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="fixed" selected>Ukuran asli (Fixed)</option>
+                            <option value="fit">Sesuai kartu (Fit dengan scale-up)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-            <button class="delete-section-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus bagian">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-            </button>
+            
+            <div class="flex flex-col items-end space-y-2 ml-4">
+                <button class="add-section-image-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Tambahkan gambar">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                </button>
+                <button class="delete-section-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus bagian">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
+            </div>
         </div>
     `;
     return sectionDivider;
+}
+
+// Function to attach events to section divider
+function attachSectionEvents(sectionDivider) {
+    const addImageBtn = sectionDivider.querySelector('.add-section-image-btn');
+    const imageFileInput = sectionDivider.querySelector('.section-image-file-input');
+    const imageArea = sectionDivider.querySelector('.section-image-area');
+    const sectionImage = sectionDivider.querySelector('.section-image');
+    const removeImageBtn = sectionDivider.querySelector('.remove-section-image-btn');
+    const imageValueInput = sectionDivider.querySelector('.section-image-value');
+    const imageSettings = sectionDivider.querySelector('.section-image-settings');
+    const alignmentSelect = sectionDivider.querySelector('.section-image-alignment-select');
+    const wrapModeSelect = sectionDivider.querySelector('.section-image-wrap-mode-select');
+    
+    // Function to update image style based on alignment and wrap mode
+    const updateImageStyle = () => {
+        if (!sectionImage || !imageArea) return;
+        
+        const alignment = alignmentSelect?.value || 'center';
+        const wrapMode = wrapModeSelect?.value || 'fixed';
+        
+        // Update alignment class
+        imageArea.classList.remove('text-left', 'text-center', 'text-right');
+        imageArea.classList.add(
+            alignment === 'left' ? 'text-left' : 
+            alignment === 'right' ? 'text-right' : 
+            'text-center'
+        );
+        
+        // Update wrap mode style
+        if (wrapMode === 'fit') {
+            sectionImage.style.width = '100%';
+            sectionImage.style.maxWidth = '100%';
+            sectionImage.style.height = 'auto';
+            sectionImage.style.objectFit = 'cover';
+        } else {
+            sectionImage.style.width = 'auto';
+            sectionImage.style.maxWidth = '100%';
+            sectionImage.style.height = 'auto';
+            sectionImage.style.objectFit = 'contain';
+        }
+    };
+    
+    const showImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.remove('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.remove('hidden');
+        }
+        updateImageStyle();
+    };
+    
+    const hideImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.add('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.add('hidden');
+        }
+    };
+    
+    if (addImageBtn && imageFileInput) {
+        addImageBtn.addEventListener('click', function() {
+            imageFileInput.click();
+        });
+    }
+    
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    if (sectionImage) {
+                        sectionImage.src = e.target.result;
+                        // Wait for image to load then apply style
+                        sectionImage.addEventListener('load', function() {
+                            updateImageStyle();
+                        }, { once: true });
+                    }
+                    if (imageValueInput) {
+                        imageValueInput.value = e.target.result;
+                    }
+                    showImageControls();
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+    
+    if (sectionImage) {
+        sectionImage.addEventListener('error', function() {
+            sectionImage.removeAttribute('src');
+            hideImageControls();
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+        });
+    }
+    
+    if (removeImageBtn) {
+        removeImageBtn.addEventListener('click', function() {
+            hideImageControls();
+            if (sectionImage) {
+                sectionImage.src = '';
+            }
+            if (imageFileInput) {
+                imageFileInput.value = '';
+            }
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+            if (alignmentSelect) {
+                alignmentSelect.value = 'center';
+            }
+            if (wrapModeSelect) {
+                wrapModeSelect.value = 'fixed';
+            }
+        });
+    }
+    
+    // Update image style when alignment changes
+    if (alignmentSelect) {
+        alignmentSelect.addEventListener('change', function() {
+            updateImageStyle();
+        });
+    }
+    
+    // Update image style when wrap mode changes
+    if (wrapModeSelect) {
+        wrapModeSelect.addEventListener('change', function() {
+            updateImageStyle();
+        });
+    }
+    
+    // Initial style update if image already exists
+    if (sectionImage && sectionImage.src) {
+        updateImageStyle();
+    }
+}
+
+// Function to create result setting card
+let resultSettingCounter = 0;
+function createResultSettingCard() {
+    resultSettingCounter++;
+    const card = document.createElement('div');
+    card.className = 'result-setting-card bg-white rounded-lg shadow-sm border-2 border-gray-200 p-6 my-6';
+    card.setAttribute('data-result-setting-id', resultSettingCounter);
+    
+    // Get result rules from settings tab
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    const resultRules = resultRulesContainer ? Array.from(resultRulesContainer.querySelectorAll('.result-rule-card')) : [];
+    
+    // Get result rule options
+    const resultRuleOptions = resultRules.map((ruleCard, index) => {
+        const conditionType = ruleCard.querySelector('.rule-condition-type')?.value || 'range';
+        const texts = Array.from(ruleCard.querySelectorAll('.rule-result-text')).map(ta => ta.value.trim()).filter(t => t);
+        const firstText = texts[0] || '';
+        
+        let label = '';
+        if (conditionType === 'range') {
+            const min = ruleCard.querySelector('.rule-min-score')?.value || '';
+            const max = ruleCard.querySelector('.rule-max-score')?.value || '';
+            label = `Range ${min}-${max}`;
+        } else {
+            const single = ruleCard.querySelector('.rule-single-score')?.value || '';
+            label = `${conditionType} ${single}`;
+        }
+        
+        return `<option value="${index}">${label}${firstText ? ' - ' + firstText.substring(0, 30) : ''}</option>`;
+    }).join('');
+    
+    card.innerHTML = `
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <div class="flex items-center space-x-3 mb-4">
+                    <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Pilih Aturan Hasil</label>
+                        <select class="result-setting-rule-select w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="">-- Pilih Aturan --</option>
+                            ${resultRuleOptions}
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Image Display Area -->
+                <div class="result-setting-image-area mb-4 hidden">
+                    <div class="relative inline-block">
+                        <img src="" alt="Result image" class="max-w-full h-auto rounded-lg border border-gray-200 result-setting-image" style="max-height: 300px;">
+                        <button class="remove-result-setting-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Hidden File Input -->
+                <input type="file" accept="image/*" class="hidden result-setting-image-file-input">
+                <input type="hidden" class="result-setting-image-value">
+                
+                <!-- Image Settings -->
+                <div class="result-setting-image-settings hidden mt-4 space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Posisi gambar</label>
+                        <select class="result-setting-image-alignment-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Text Display Area -->
+                <div class="mt-4">
+                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Teks Hasil</label>
+                    <textarea 
+                        rows="4"
+                        class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
+                        placeholder="Teks hasil akan diambil dari aturan yang dipilih"
+                    ></textarea>
+                </div>
+                
+                <!-- Text Alignment -->
+                <div class="mt-4">
+                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Posisi teks</label>
+                    <select class="result-setting-text-alignment-select text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                        <option value="left">Kiri</option>
+                        <option value="center" selected>Tengah</option>
+                        <option value="right">Kanan</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="flex flex-col items-end space-y-2 ml-4">
+                <button class="add-result-setting-image-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Tambahkan gambar">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                </button>
+                <button class="delete-result-setting-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus setup hasil">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `;
+    return card;
+}
+
+// Function to attach events to result setting card
+function attachResultSettingEvents(card) {
+    const ruleSelect = card.querySelector('.result-setting-rule-select');
+    const addImageBtn = card.querySelector('.add-result-setting-image-btn');
+    const imageFileInput = card.querySelector('.result-setting-image-file-input');
+    const imageArea = card.querySelector('.result-setting-image-area');
+    const resultImage = card.querySelector('.result-setting-image');
+    const removeImageBtn = card.querySelector('.remove-result-setting-image-btn');
+    const imageValueInput = card.querySelector('.result-setting-image-value');
+    const imageSettings = card.querySelector('.result-setting-image-settings');
+    const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
+    const textArea = card.querySelector('.result-setting-text');
+    const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
+    const deleteBtn = card.querySelector('.delete-result-setting-btn');
+    
+    // Update text from selected rule
+    if (ruleSelect) {
+        ruleSelect.addEventListener('change', function() {
+            const selectedIndex = parseInt(this.value);
+            if (!isNaN(selectedIndex)) {
+                const resultRulesContainer = document.getElementById('result-rules-container');
+                if (resultRulesContainer) {
+                    const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
+                    const selectedRule = ruleCards[selectedIndex];
+                    if (selectedRule && textArea) {
+                        const texts = Array.from(selectedRule.querySelectorAll('.rule-result-text'))
+                            .map(ta => ta.value.trim())
+                            .filter(t => t);
+                        textArea.value = texts.join('\n\n');
+                    }
+                }
+            }
+        });
+    }
+    
+    // Image upload
+    if (addImageBtn && imageFileInput) {
+        addImageBtn.addEventListener('click', () => imageFileInput.click());
+        
+        imageFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const base64 = event.target.result;
+                if (imageValueInput) {
+                    imageValueInput.value = base64;
+                }
+                if (resultImage) {
+                    resultImage.src = base64;
+                }
+                if (imageArea) {
+                    imageArea.classList.remove('hidden');
+                }
+                if (imageSettings) {
+                    imageSettings.classList.remove('hidden');
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    // Remove image
+    if (removeImageBtn) {
+        removeImageBtn.addEventListener('click', function() {
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+            if (resultImage) {
+                resultImage.src = '';
+            }
+            if (imageArea) {
+                imageArea.classList.add('hidden');
+            }
+            if (imageSettings) {
+                imageSettings.classList.add('hidden');
+            }
+            if (imageFileInput) {
+                imageFileInput.value = '';
+            }
+        });
+    }
+    
+    // Delete card
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function() {
+            card.remove();
+        });
+    }
 }
 
 // Question templates untuk setiap tipe
@@ -933,6 +1419,28 @@ function createQuestionCard(type = 'short-answer') {
                             `).join('')}
                         </div>
                     </div>
+                </div>
+                
+                <!-- Quick Add Buttons (shown when card is active) -->
+                <div class="question-quick-add-buttons hidden flex-col items-end space-y-2 mt-2">
+                    <button class="quick-add-question-btn flex items-center space-x-1 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors" title="Tambah pertanyaan">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        <span>Tambah pertanyaan</span>
+                    </button>
+                    <button class="quick-add-section-btn flex items-center space-x-1 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors" title="Tambahkan bagian">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <span>Tambahkan bagian</span>
+                    </button>
+                    <button class="quick-add-result-setting-btn hidden items-center space-x-1 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors" title="Setup Hasil">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span>Setup Hasil</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -2046,6 +2554,7 @@ document.addEventListener('DOMContentLoaded', function() {
         populateFormBuilder(initialData);
     } else {
         updateThemeColorSelection('red');
+        updateMainButtonsVisibility();
     }
     
     updateRuleSaveControlsVisibility();
@@ -2151,6 +2660,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateQuestionNumbers();
             attachQuestionCardEvents(questionCard);
             initSortable();
+            updateMainButtonsVisibility();
             
             // Focus ke input pertanyaan
             setTimeout(() => {
@@ -2168,6 +2678,7 @@ document.addEventListener('DOMContentLoaded', function() {
         addSectionBtn.addEventListener('click', function() {
             const sectionDivider = createSectionDivider();
             questionsContainer.appendChild(sectionDivider);
+            attachSectionEvents(sectionDivider);
             
             // Attach delete event
             const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
@@ -2175,12 +2686,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 deleteBtn.addEventListener('click', function() {
                     sectionDivider.remove();
                     updateSectionNumbers();
+                    updateMainButtonsVisibility();
                 });
             }
             
             initSortable();
+            updateMainButtonsVisibility();
         });
     }
+    
+    // Initial check for main buttons visibility
+    updateMainButtonsVisibility();
     
     // Tutup menu saat klik di luar (untuk modal yang mungkin masih digunakan di tempat lain)
     if (questionTypesMenu) {
@@ -2310,6 +2826,7 @@ function attachQuestionCardEvents(card) {
         deleteBtn.addEventListener('click', function() {
             card.remove();
             updateQuestionNumbers();
+            updateMainButtonsVisibility();
         });
     }
     
@@ -2327,6 +2844,7 @@ function attachQuestionCardEvents(card) {
             card.parentNode.insertBefore(newCard, card.nextSibling);
             updateQuestionNumbers();
             attachQuestionCardEvents(newCard);
+            updateMainButtonsVisibility();
         });
     }
     
@@ -2401,6 +2919,92 @@ function attachQuestionCardEvents(card) {
     // Attach option events
     attachOptionEvents(card);
     
+    // Quick add buttons
+    const quickAddButtons = card.querySelector('.question-quick-add-buttons');
+    const quickAddQuestionBtn = card.querySelector('.quick-add-question-btn');
+    const quickAddSectionBtn = card.querySelector('.quick-add-section-btn');
+    const quickAddResultSettingBtn = card.querySelector('.quick-add-result-setting-btn');
+    
+    // Check if form has result rules
+    const hasResultRules = () => {
+        const resultRulesContainer = document.getElementById('result-rules-container');
+        if (!resultRulesContainer) return false;
+        const placeholder = resultRulesContainer.querySelector('.result-rules-placeholder');
+        const ruleCards = resultRulesContainer.querySelectorAll('.result-rule-card');
+        return !placeholder && ruleCards.length > 0;
+    };
+    
+    // Function to show/hide quick add buttons
+    const showQuickAddButtons = () => {
+        if (quickAddButtons) {
+            quickAddButtons.classList.remove('hidden');
+            // Show/hide setup hasil button based on result rules
+            if (quickAddResultSettingBtn) {
+                if (hasResultRules()) {
+                    quickAddResultSettingBtn.classList.remove('hidden');
+                    quickAddResultSettingBtn.classList.add('flex');
+                } else {
+                    quickAddResultSettingBtn.classList.add('hidden');
+                    quickAddResultSettingBtn.classList.remove('flex');
+                }
+            }
+        }
+    };
+    
+    const hideQuickAddButtons = () => {
+        if (quickAddButtons) {
+            quickAddButtons.classList.add('hidden');
+        }
+    };
+    
+    // Quick add question button
+    if (quickAddQuestionBtn) {
+        quickAddQuestionBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (questionsContainer) {
+                const questionCard = createQuestionCard('short-answer');
+                questionsContainer.insertBefore(questionCard, card.nextSibling);
+                updateQuestionNumbers();
+                attachQuestionCardEvents(questionCard);
+                initSortable();
+                updateMainButtonsVisibility();
+                
+                setTimeout(() => {
+                    const titleInput = questionCard.querySelector('.question-title');
+                    if (titleInput) {
+                        titleInput.focus();
+                    }
+                }, 100);
+            }
+        });
+    }
+    
+    // Quick add section button
+    if (quickAddSectionBtn) {
+        quickAddSectionBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (questionsContainer) {
+                const sectionDivider = createSectionDivider();
+                questionsContainer.insertBefore(sectionDivider, card.nextSibling);
+                attachSectionEvents(sectionDivider);
+                
+                const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', function() {
+                        sectionDivider.remove();
+                        updateSectionNumbers();
+                        updateMainButtonsVisibility();
+                    });
+                }
+                
+                initSortable();
+                updateMainButtonsVisibility();
+            }
+        });
+    }
+    
     // Active state highlight saat focus pada input pertanyaan
     const questionTitle = card.querySelector('.question-title');
     if (questionTitle) {
@@ -2409,10 +3013,15 @@ function attachQuestionCardEvents(card) {
             document.querySelectorAll('.question-card').forEach(c => {
                 c.classList.remove('ring-2', 'ring-red-600', 'border-red-600');
                 c.classList.add('border-gray-200');
+                const quickAdd = c.querySelector('.question-quick-add-buttons');
+                if (quickAdd) {
+                    quickAdd.classList.add('hidden');
+                }
             });
             // Add active ke card ini
             card.classList.add('ring-2', 'ring-red-600', 'border-red-600');
             card.classList.remove('border-gray-200');
+            showQuickAddButtons();
         });
     }
     
@@ -2424,14 +3033,37 @@ function attachQuestionCardEvents(card) {
             || e.target.closest('select')
             || e.target.closest('.question-type-dropdown')
             || e.target.closest('.question-advanced-settings')
-            || e.target.closest('.option-item');
+            || e.target.closest('.option-item')
+            || e.target.closest('.question-quick-add-buttons');
 
         if (shouldSkipFocus) {
             return;
         }
 
+        // Remove active dari semua cards
+        document.querySelectorAll('.question-card').forEach(c => {
+            c.classList.remove('ring-2', 'ring-red-600', 'border-red-600');
+            c.classList.add('border-gray-200');
+            const quickAdd = c.querySelector('.question-quick-add-buttons');
+            if (quickAdd) {
+                quickAdd.classList.add('hidden');
+            }
+        });
+        
+        // Add active ke card ini
+        card.classList.add('ring-2', 'ring-red-600', 'border-red-600');
+        card.classList.remove('border-gray-200');
+        showQuickAddButtons();
+
         if (questionTitle) {
             questionTitle.focus();
+        }
+    });
+    
+    // Hide quick add buttons when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!card.contains(e.target)) {
+            hideQuickAddButtons();
         }
     });
     
@@ -2697,17 +3329,25 @@ function collectFormData() {
         sections: [],
         questions: [],
         answer_templates: [],
-        result_rules: []
+        result_rules: [],
+        result_settings: []
     };
 
     // Collect sections
     const sections = document.querySelectorAll('.section-divider');
     sections.forEach((section, index) => {
-        const titleEl = section.querySelector('.section-title');
-        const descEl = section.querySelector('.section-description');
+        const titleInput = section.querySelector('.section-title-input');
+        const descInput = section.querySelector('.section-description-input');
+        const imageValueInput = section.querySelector('.section-image-value');
+        const alignmentSelect = section.querySelector('.section-image-alignment-select');
+        const wrapModeSelect = section.querySelector('.section-image-wrap-mode-select');
+        
         formData.sections.push({
-            title: titleEl?.textContent || null,
-            description: descEl?.textContent || null
+            title: titleInput?.value?.trim() || null,
+            description: descInput?.value?.trim() || null,
+            image: imageValueInput?.value?.trim() || null,
+            image_alignment: alignmentSelect?.value || 'center',
+            image_wrap_mode: wrapModeSelect?.value || 'fixed',
         });
     });
 
@@ -2864,6 +3504,32 @@ function collectFormData() {
 
         if (questionData.title) {
             formData.questions.push(questionData);
+        }
+    });
+    
+    // Collect result settings (always at the bottom)
+    const resultSettingCards = questionsContainer.querySelectorAll('.result-setting-card');
+    resultSettingCards.forEach((card) => {
+        const ruleSelect = card.querySelector('.result-setting-rule-select');
+        const textArea = card.querySelector('.result-setting-text');
+        const imageValueInput = card.querySelector('.result-setting-image-value');
+        const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
+        const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
+        
+        const resultRuleIndex = ruleSelect ? parseInt(ruleSelect.value) : null;
+        const resultText = textArea ? textArea.value.trim() : null;
+        const image = imageValueInput ? imageValueInput.value.trim() : null;
+        const imageAlignment = alignmentSelect ? alignmentSelect.value : 'center';
+        const textAlignment = textAlignmentSelect ? textAlignmentSelect.value : 'center';
+        
+        if (resultRuleIndex !== null && resultRuleIndex >= 0) {
+            formData.result_settings.push({
+                result_rule_index: resultRuleIndex,
+                result_text: resultText,
+                image: image || null,
+                image_alignment: imageAlignment,
+                text_alignment: textAlignment,
+            });
         }
     });
 
@@ -3035,6 +3701,24 @@ function populateFormBuilder(data) {
         return;
     }
 
+    // Clear all form data first to ensure no data from previous form remains
+    const answerTemplatesContainer = document.getElementById('answer-templates-container');
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    const questionsContainer = document.getElementById('questions-container');
+    
+    if (answerTemplatesContainer) {
+        answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
+    }
+    
+    if (resultRulesContainer) {
+        resultRulesContainer.innerHTML = getResultRulesPlaceholder();
+    }
+    
+    if (questionsContainer) {
+        // Clear all questions, sections, and result settings
+        questionsContainer.innerHTML = '';
+    }
+
     const titleInput = document.getElementById('form-title');
     if (titleInput) {
         titleInput.value = data.title || '';
@@ -3061,9 +3745,7 @@ function populateFormBuilder(data) {
         checkbox.dispatchEvent(new Event('change'));
     });
 
-    const answerTemplatesContainer = document.getElementById('answer-templates-container');
     if (answerTemplatesContainer) {
-        answerTemplatesContainer.innerHTML = '';
         const templates = Array.isArray(data.answer_templates) ? data.answer_templates : [];
 
         if (templates.length === 0) {
@@ -3098,9 +3780,7 @@ function populateFormBuilder(data) {
         }
     }
 
-    const resultRulesContainer = document.getElementById('result-rules-container');
     if (resultRulesContainer) {
-        resultRulesContainer.innerHTML = '';
         const rules = Array.isArray(data.result_rules) ? data.result_rules : [];
 
         if (rules.length === 0) {
@@ -3165,7 +3845,6 @@ function populateFormBuilder(data) {
         }
     }
 
-    const questionsContainer = document.getElementById('questions-container');
     if (!questionsContainer) {
         return;
     }
@@ -3183,15 +3862,92 @@ function populateFormBuilder(data) {
         container: questionsContainer,
         batchSize,
         onComplete: () => {
+            updateMainButtonsVisibility();
             if (questions.length === 0) {
                 const defaultQuestion = createQuestionCard('short-answer');
                 questionsContainer.appendChild(defaultQuestion);
                 attachQuestionCardEvents(defaultQuestion);
             }
+            
+            // Load result settings
+            const resultSettings = Array.isArray(data.result_settings) ? data.result_settings : [];
+            resultSettings.forEach((setting) => {
+                const resultSettingCard = createResultSettingCard();
+                questionsContainer.appendChild(resultSettingCard);
+                attachResultSettingEvents(resultSettingCard);
+                
+                // Populate data
+                const ruleSelect = resultSettingCard.querySelector('.result-setting-rule-select');
+                const textArea = resultSettingCard.querySelector('.result-setting-text');
+                const imageValueInput = resultSettingCard.querySelector('.result-setting-image-value');
+                const imageArea = resultSettingCard.querySelector('.result-setting-image-area');
+                const resultImage = resultSettingCard.querySelector('.result-setting-image');
+                const imageSettings = resultSettingCard.querySelector('.result-setting-image-settings');
+                const alignmentSelect = resultSettingCard.querySelector('.result-setting-image-alignment-select');
+                const textAlignmentSelect = resultSettingCard.querySelector('.result-setting-text-alignment-select');
+                
+                // Find matching result rule index (need to match by order since we don't have ID in frontend)
+                // For now, we'll use the order/index from result_rules array
+                const resultRules = Array.isArray(data.result_rules) ? data.result_rules : [];
+                // Try to find by matching texts or use index if available
+                let ruleIndex = -1;
+                if (setting.result_rule_id) {
+                    // If we have rule_id, we need to find it in the loaded rules
+                    // For now, we'll use a simple index-based approach
+                    ruleIndex = resultRules.findIndex((r, idx) => {
+                        // Try to match by result_text if available
+                        if (setting.result_text) {
+                            const ruleTexts = Array.isArray(r.texts) ? r.texts : [];
+                            return ruleTexts.some(t => t === setting.result_text);
+                        }
+                        return false;
+                    });
+                }
+                
+                // If not found, try to use order/index
+                if (ruleIndex < 0 && resultRules.length > 0) {
+                    // Use first available rule as fallback
+                    ruleIndex = 0;
+                }
+                
+                if (ruleIndex >= 0 && ruleSelect) {
+                    ruleSelect.value = ruleIndex;
+                    ruleSelect.dispatchEvent(new Event('change'));
+                }
+                
+                if (textArea && setting.result_text) {
+                    textArea.value = setting.result_text;
+                }
+                
+                if (textAlignmentSelect && setting.text_alignment) {
+                    textAlignmentSelect.value = setting.text_alignment;
+                }
+                
+                if (setting.image) {
+                    const imageUrl = setting.image_url || setting.image;
+                    if (imageValueInput) {
+                        imageValueInput.value = imageUrl;
+                    }
+                    if (resultImage) {
+                        resultImage.src = imageUrl;
+                    }
+                    if (imageArea) {
+                        imageArea.classList.remove('hidden');
+                    }
+                    if (imageSettings) {
+                        imageSettings.classList.remove('hidden');
+                    }
+                    if (alignmentSelect && setting.image_alignment) {
+                        alignmentSelect.value = setting.image_alignment;
+                    }
+                }
+            });
+            
             updateSectionNumbers();
             updateQuestionNumbers();
             updateUseRuleButtonsVisibility();
             initSortable();
+            updateMainButtonsVisibility();
         },
     });
 }

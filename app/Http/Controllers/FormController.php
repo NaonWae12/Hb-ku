@@ -116,6 +116,7 @@ class FormController extends Controller
                 'answer_templates' => $request->input('answer_templates', []),
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
+                'result_settings' => $request->input('result_settings', []),
             ]);
 
             DB::commit();
@@ -165,6 +166,9 @@ class FormController extends Controller
                 $query->with(['texts' => function ($textQuery) {
                     $textQuery->orderBy('order');
                 }])->orderBy('order');
+            },
+            'resultSettings' => function ($query) {
+                $query->orderBy('order');
             },
         ]);
 
@@ -225,12 +229,14 @@ class FormController extends Controller
             $form->sections()->delete();
             $form->answerTemplates()->delete();
             $form->resultRules()->delete();
+            $form->resultSettings()->delete();
 
             $this->syncFormRelations($form, [
                 'sections' => $request->input('sections', []),
                 'answer_templates' => $request->input('answer_templates', []),
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
+                'result_settings' => $request->input('result_settings', []),
             ]);
 
             DB::commit();
@@ -553,6 +559,9 @@ class FormController extends Controller
             $section = $form->sections()->create([
                 'title' => $sectionData['title'] ?? null,
                 'description' => $sectionData['description'] ?? null,
+                'image' => $this->processQuestionImage($sectionData['image'] ?? null, $form),
+                'image_alignment' => $sectionData['image_alignment'] ?? 'center',
+                'image_wrap_mode' => $sectionData['image_wrap_mode'] ?? 'fixed',
                 'order' => $index,
             ]);
 
@@ -589,6 +598,7 @@ class FormController extends Controller
         $nextTemplateOrder = count($answerTemplateLookup);
 
         $resultRules = $payload['result_rules'] ?? [];
+        $resultRuleIdMap = [];
 
         foreach ($resultRules as $index => $ruleData) {
             if (!is_array($ruleData)) {
@@ -602,6 +612,8 @@ class FormController extends Controller
                 'single_score' => $ruleData['single_score'] ?? null,
                 'order' => $index,
             ]);
+
+            $resultRuleIdMap[$index] = $rule->id;
 
             foreach ($ruleData['texts'] ?? [] as $textIndex => $text) {
                 $textValue = trim($text ?? '');
@@ -690,6 +702,37 @@ class FormController extends Controller
                 ]);
             }
         }
+
+        // Handle result settings
+        $resultSettings = $payload['result_settings'] ?? [];
+        foreach ($resultSettings as $index => $settingData) {
+            if (!is_array($settingData)) {
+                continue;
+            }
+
+            $resultRuleId = null;
+            if (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
+                $resultRuleId = $resultRuleIdMap[$settingData['result_rule_index']];
+            }
+
+            // Get result text from result rule if not provided
+            $resultText = $settingData['result_text'] ?? null;
+            if (!$resultText && $resultRuleId) {
+                $rule = $form->resultRules()->find($resultRuleId);
+                if ($rule && $rule->texts->isNotEmpty()) {
+                    $resultText = $rule->texts->first()->result_text;
+                }
+            }
+
+            $form->resultSettings()->create([
+                'result_rule_id' => $resultRuleId,
+                'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
+                'image_alignment' => $settingData['image_alignment'] ?? 'center',
+                'result_text' => $resultText,
+                'text_alignment' => $settingData['text_alignment'] ?? 'center',
+                'order' => $index,
+            ]);
+        }
     }
 
     /**
@@ -706,6 +749,10 @@ class FormController extends Controller
             return [
                 'title' => $section->title,
                 'description' => $section->description,
+                'image' => $section->image,
+                'image_alignment' => $section->image_alignment ?? 'center',
+                'image_wrap_mode' => $section->image_wrap_mode ?? 'fixed',
+                'image_url' => $section->image ? asset($section->image) : null,
             ];
         })->toArray();
 
@@ -775,6 +822,20 @@ class FormController extends Controller
                 ];
             })->toArray();
 
+        $resultSettingsData = $form->resultSettings
+            ->sortBy('order')
+            ->values()
+            ->map(function ($setting) {
+                return [
+                    'result_rule_id' => $setting->result_rule_id,
+                    'image' => $setting->image,
+                    'image_alignment' => $setting->image_alignment ?? 'center',
+                    'result_text' => $setting->result_text,
+                    'text_alignment' => $setting->text_alignment ?? 'center',
+                    'image_url' => $setting->image ? asset($setting->image) : null,
+                ];
+            })->toArray();
+
         return [
             'id' => $form->id,
             'slug' => $form->slug,
@@ -790,6 +851,7 @@ class FormController extends Controller
             'questions' => $questionsData,
             'answer_templates' => $answerTemplatesData,
             'result_rules' => $resultRulesData,
+            'result_settings' => $resultSettingsData,
         ];
     }
 }

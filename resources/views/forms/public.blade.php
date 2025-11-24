@@ -64,14 +64,56 @@
             @foreach($pages as $pageIndex => $page)
                 <div class="form-page {{ $pageIndex === 0 ? 'active' : '' }}" data-page="{{ $pageIndex }}">
                     @if($page['section'])
-                        <div class="bg-white rounded-2xl shadow border border-gray-100 p-6 mb-6">
-                            <div class="mb-4">
-                                <h2 class="text-lg font-semibold text-gray-900">{{ $page['section']->title ?? 'Bagian' }}</h2>
-                                @if($page['section']->description)
-                                    <p class="text-sm text-gray-600 mt-1">{{ $page['section']->description }}</p>
+                        @php
+                            $section = $page['section'];
+                            $title = trim($section->title ?? '');
+                            $description = trim($section->description ?? '');
+                            $hasImage = !empty($section->image);
+                            // Check if section has been edited (not default "Bagian X" pattern)
+                            $hasValidTitle = $title !== '' && !preg_match('/^Bagian\s+\d+$/i', $title);
+                            $isEdited = $hasValidTitle || $description !== '' || $hasImage;
+                        @endphp
+                        @if($isEdited)
+                            @php
+                                $imageAlignment = $section->image_alignment ?? 'center';
+                                $alignmentClass = match ($imageAlignment) {
+                                    'left' => 'text-left',
+                                    'right' => 'text-right',
+                                    default => 'text-center',
+                                };
+                                $imageWrapMode = $section->image_wrap_mode ?? 'fixed';
+                                $imageStyle = $imageWrapMode === 'fit' 
+                                    ? 'width: 100%; max-width: 100%; height: auto; object-fit: cover;' 
+                                    : 'max-width: 100%; height: auto;';
+                            @endphp
+                            <div class="bg-white rounded-2xl shadow border border-gray-100 p-6 mb-6">
+                                @if($hasValidTitle || $description !== '')
+                                    <div class="mb-4">
+                                        @if($hasValidTitle)
+                                            <h2 class="text-lg font-semibold text-gray-900">{{ $title }}</h2>
+                                        @endif
+                                        @if($description !== '')
+                                            <p class="text-sm text-gray-600 mt-1">{{ $description }}</p>
+                                        @endif
+                                    </div>
+                                @endif
+                                
+                                @if($section->image)
+                                    <div class="{{ $hasValidTitle || $description !== '' ? 'mt-4' : 'mb-4' }} {{ $alignmentClass }}">
+                                        @php
+                                            $imageUrl = $section->image;
+                                            if (!str_starts_with($imageUrl, 'http://') && !str_starts_with($imageUrl, 'https://')) {
+                                                $imageUrl = asset($imageUrl);
+                                            }
+                                        @endphp
+                                        <img src="{{ $imageUrl }}" alt="Gambar bagian"
+                                            class="rounded-xl border border-gray-200 object-contain inline-block"
+                                            style="{{ $imageStyle }}"
+                                            onerror="this.style.display='none';">
+                                    </div>
                                 @endif
                             </div>
-                        </div>
+                        @endif
                     @endif
 
                     @foreach($page['questions'] as $question)

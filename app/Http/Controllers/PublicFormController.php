@@ -48,9 +48,29 @@ class PublicFormController extends Controller
     }
 
     /**
+     * Check if a section has been edited (has meaningful content).
+     */
+    private function isSectionEdited($section): bool
+    {
+        if (!$section) {
+            return false;
+        }
+        
+        $title = trim($section->title ?? '');
+        $description = trim($section->description ?? '');
+        $hasImage = !empty($section->image);
+        
+        // Check if title is not empty and not a default "Bagian X" pattern
+        $hasValidTitle = $title !== '' && !preg_match('/^Bagian\s+\d+$/i', $title);
+        
+        return $hasValidTitle || $description !== '' || $hasImage;
+    }
+
+    /**
      * Group questions into pages where sections act as page dividers.
      * All questions before a section appear on the same page.
      * The section and its questions appear on the next page.
+     * Sections always act as dividers (partition), but only edited sections are displayed.
      */
     private function groupQuestionsIntoPages(Form $form): array
     {
@@ -61,7 +81,7 @@ class PublicFormController extends Controller
         $currentPageQuestions = [];
         $currentPageSection = null;
         
-        // Create a map of section_id to section for quick lookup
+        // Create a map of section_id to section for quick lookup (all sections)
         $sectionMap = $sections->keyBy('id');
         
         // Process each question in order
@@ -75,21 +95,28 @@ class PublicFormController extends Controller
                 // Question belongs to a section
                 $questionSection = $sectionMap->get($questionSectionId);
                 
-                if ($currentPageSection && $currentPageSection->id === $questionSectionId) {
-                    // Same section as current page - add to current page
-                    $currentPageQuestions[] = $question;
-                } else {
-                    // Different section - save current page and start new page
-                    if (count($currentPageQuestions) > 0 || $currentPageSection) {
-                        $pages[] = [
-                            'section' => $currentPageSection,
-                            'questions' => $currentPageQuestions,
-                        ];
+                if ($questionSection) {
+                    // Section always acts as divider, regardless of whether it's edited
+                    if ($currentPageSection && $currentPageSection->id === $questionSectionId) {
+                        // Same section as current page - add to current page
+                        $currentPageQuestions[] = $question;
+                    } else {
+                        // Different section - save current page and start new page
+                        // Section always acts as divider, but only show if edited
+                        if (count($currentPageQuestions) > 0 || $currentPageSection) {
+                            $pages[] = [
+                                'section' => ($currentPageSection && $this->isSectionEdited($currentPageSection)) ? $currentPageSection : null,
+                                'questions' => $currentPageQuestions,
+                            ];
+                        }
+                        
+                        // Start new page with this section (always use as divider)
+                        $currentPageSection = $questionSection;
+                        $currentPageQuestions = [$question];
                     }
-                    
-                    // Start new page with this section
-                    $currentPageSection = $questionSection;
-                    $currentPageQuestions = [$question];
+                } else {
+                    // Section not found, treat question as if it has no section
+                    $currentPageQuestions[] = $question;
                 }
             }
         }
@@ -97,17 +124,19 @@ class PublicFormController extends Controller
         // Add the last page
         if (count($currentPageQuestions) > 0 || $currentPageSection) {
             $pages[] = [
-                'section' => $currentPageSection,
+                'section' => ($currentPageSection && $this->isSectionEdited($currentPageSection)) ? $currentPageSection : null,
                 'questions' => $currentPageQuestions,
             ];
         }
         
         // Handle section dividers (sections with no questions)
         // These should split questions based on order
+        // All sections act as dividers, but only edited ones are displayed
         foreach ($sections as $section) {
             $sectionQuestions = $allQuestions->where('section_id', $section->id);
             
             // If this is a section divider (no questions assigned to it)
+            // Section always acts as divider, regardless of whether it's edited
             if ($sectionQuestions->isEmpty()) {
                 // Find questions that should be split by this section divider
                 // Questions with order < section.order and no section_id go before
@@ -159,7 +188,7 @@ class PublicFormController extends Controller
                                 
                                 if (count($afterQuestions) > 0) {
                                     $newPages[] = [
-                                        'section' => $section,
+                                        'section' => $this->isSectionEdited($section) ? $section : null,
                                         'questions' => $afterQuestions,
                                     ];
                                 }
