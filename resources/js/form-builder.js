@@ -167,37 +167,8 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
         }
 
         if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionType)) {
-            const inputArea = questionCard.querySelector('.question-input-area');
             const options = Array.isArray(questionData.options) ? questionData.options : [];
-
-            if (inputArea) {
-                let optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
-                const addOptionBtn = questionCard.querySelector('.add-option-btn');
-
-                while (options.length > optionItems.length && addOptionBtn) {
-                    addOptionBtn.click();
-                    optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
-                }
-
-                optionItems.forEach((item, idx) => {
-                    const input = item.querySelector('.option-input');
-                    if (!input) {
-                        return;
-                    }
-
-                    if (idx < options.length) {
-                        input.value = options[idx].text || '';
-                    } else if (options.length === 0) {
-                        if (idx > 1) {
-                            item.remove();
-                        } else {
-                            input.value = '';
-                        }
-                    } else {
-                        item.remove();
-                    }
-                });
-            }
+            setQuestionOptions(questionCard, questionType, options);
         }
 
         if (questionData.saved_rule) {
@@ -235,6 +206,74 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
     }
 
     requestAnimationFrame(processBatch);
+}
+
+function createOptionElementNode(type, text = '', index = 0) {
+    const optionItem = document.createElement('div');
+    optionItem.className = 'option-item flex items-center space-x-2';
+
+    if (type === 'multiple-choice') {
+        const indicator = document.createElement('input');
+        indicator.type = 'radio';
+        indicator.className = 'text-red-600 focus:ring-red-500 mt-1';
+        optionItem.appendChild(indicator);
+    } else if (type === 'checkbox') {
+        const indicator = document.createElement('input');
+        indicator.type = 'checkbox';
+        indicator.className = 'rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1';
+        optionItem.appendChild(indicator);
+    } else if (type === 'dropdown') {
+        const order = document.createElement('span');
+        order.className = 'text-sm text-gray-500 w-4';
+        order.textContent = `${index + 1}.`;
+        optionItem.appendChild(order);
+    }
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = `Opsi ${index + 1}`;
+    input.value = text || '';
+    input.className = 'flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input';
+    optionItem.appendChild(input);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100';
+    removeBtn.title = 'Hapus opsi';
+    removeBtn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+    `;
+    optionItem.appendChild(removeBtn);
+
+    return optionItem;
+}
+
+function setQuestionOptions(card, questionType, options) {
+    const container = card.querySelector('[data-option-container="true"]');
+    if (!container) {
+        return;
+    }
+
+    const controls = container.querySelector('.option-controls');
+    const savedRulesWrapper = container.querySelector('.use-saved-rules-wrapper');
+    const insertBeforeNode = controls || savedRulesWrapper || null;
+
+    const existingOptions = container.querySelectorAll('.option-item');
+    existingOptions.forEach(item => item.remove());
+
+    const normalizedOptions = options.length
+        ? options
+        : (questionType === 'dropdown' ? [{}, {}] : [{}, {}]);
+
+    normalizedOptions.forEach((option, idx) => {
+        const optionNode = createOptionElementNode(questionType, option?.text || '', idx);
+        if (insertBeforeNode) {
+            container.insertBefore(optionNode, insertBeforeNode);
+        } else {
+            container.appendChild(optionNode);
+        }
+    });
 }
 
 function hydrateRuleBuilderFromPreset(preset) {
@@ -375,7 +414,7 @@ const questionTemplates = {
         icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`,
         label: 'Pilihan ganda',
         input: `
-            <div class="space-y-2 max-w-md mt-4">
+            <div class="question-options-wrapper space-y-2 max-w-md mt-4" data-option-container="true">
                 <div class="option-item flex items-center space-x-2">
                     <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                     <input 
@@ -402,7 +441,7 @@ const questionTemplates = {
                         </svg>
                     </button>
                 </div>
-                <div class="mt-2 space-y-1">
+                <div class="option-controls mt-2 space-y-1">
                     <button class="add-option-btn text-sm text-gray-600 hover:text-red-600 flex items-center space-x-1">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -429,7 +468,7 @@ const questionTemplates = {
         icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`,
         label: 'Kotak centang',
         input: `
-            <div class="space-y-2 max-w-md mt-4">
+            <div class="question-options-wrapper space-y-2 max-w-md mt-4" data-option-container="true">
                 <div class="option-item flex items-center space-x-2">
                     <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                     <input 
@@ -456,7 +495,7 @@ const questionTemplates = {
                         </svg>
                     </button>
                 </div>
-                <div class="mt-2 space-y-1">
+                <div class="option-controls mt-2 space-y-1">
                     <button class="add-option-btn text-sm text-gray-600 hover:text-red-600 flex items-center space-x-1">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -475,7 +514,7 @@ const questionTemplates = {
         icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>`,
         label: 'Dropdown',
         input: `
-            <div class="space-y-2 max-w-md mt-4">
+            <div class="question-options-wrapper space-y-2 max-w-md mt-4" data-option-container="true">
                 <div class="option-item flex items-center space-x-2">
                     <span class="text-sm text-gray-500 w-4">1.</span>
                     <input 
@@ -502,7 +541,7 @@ const questionTemplates = {
                         </svg>
                     </button>
                 </div>
-                <div class="mt-2 space-y-1">
+                <div class="option-controls mt-2 space-y-1">
                     <button class="add-option-btn text-sm text-gray-600 hover:text-red-600 flex items-center space-x-1">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -1538,27 +1577,11 @@ function applySavedRuleToQuestion(questionCard, savedRule) {
     const templates = Array.isArray(rule.templates) ? rule.templates : [];
 
     if (questionCard.getAttribute('data-question-type') === 'multiple-choice' && templates.length) {
-        const addOptionBtn = questionCard.querySelector('.add-option-btn');
-        const container = questionCard.querySelector('.question-input-area > div');
-        if (container && addOptionBtn) {
-            let optionItems = Array.from(container.querySelectorAll('.option-item'));
-            while (optionItems.length < templates.length) {
-                addOptionBtn.click();
-                optionItems = Array.from(container.querySelectorAll('.option-item'));
-            }
-
-            optionItems.forEach((item, idx) => {
-                const input = item.querySelector('.option-input');
-                if (!input) {
-                    return;
-                }
-                if (idx < templates.length) {
-                    input.value = templates[idx].answer_text || templates[idx].text || '';
-                } else {
-                    item.remove();
-                }
-            });
-        }
+        const normalizedOptions = templates.map(template => ({
+            text: template.answer_text || template.text || '',
+        }));
+        setQuestionOptions(questionCard, 'multiple-choice', normalizedOptions);
+        attachOptionEvents(questionCard);
     }
 
     let ruleBadgesContainer = questionCard.querySelector('.saved-rule-badges');
@@ -2298,20 +2321,23 @@ function attachOptionEvents(card) {
     // Show remove button on hover untuk option items
     const optionItems = card.querySelectorAll('.option-item');
     optionItems.forEach(item => {
-        item.addEventListener('mouseenter', function() {
-            const removeBtn = this.querySelector('.remove-option-btn');
-            if (removeBtn) {
-                removeBtn.classList.remove('opacity-0');
-                removeBtn.classList.add('opacity-100');
-            }
-        });
-        item.addEventListener('mouseleave', function() {
-            const removeBtn = this.querySelector('.remove-option-btn');
-            if (removeBtn) {
-                removeBtn.classList.add('opacity-0');
-                removeBtn.classList.remove('opacity-100');
-            }
-        });
+        if (!item.hasAttribute('data-hover-listener')) {
+            item.setAttribute('data-hover-listener', 'true');
+            item.addEventListener('mouseenter', function() {
+                const removeBtn = this.querySelector('.remove-option-btn');
+                if (removeBtn) {
+                    removeBtn.classList.remove('opacity-0');
+                    removeBtn.classList.add('opacity-100');
+                }
+            });
+            item.addEventListener('mouseleave', function() {
+                const removeBtn = this.querySelector('.remove-option-btn');
+                if (removeBtn) {
+                    removeBtn.classList.add('opacity-0');
+                    removeBtn.classList.remove('opacity-100');
+                }
+            });
+        }
     });
     
     // Add option button
@@ -2320,71 +2346,22 @@ function attachOptionEvents(card) {
         if (!btn.hasAttribute('data-listener')) {
             btn.setAttribute('data-listener', 'true');
             btn.addEventListener('click', function() {
-                const container = card.querySelector('.question-input-area > div');
-                const addSection = btn.closest('.mt-2.space-y-1');
-                const optionCount = container ? container.querySelectorAll('.option-item').length + 1 : 1;
-                const type = card.getAttribute('data-question-type');
-                let newOption;
-                
-                if (type === 'multiple-choice') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                placeholder="Opsi ${optionCount}" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else if (type === 'checkbox') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                placeholder="Opsi ${optionCount}" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else if (type === 'dropdown') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <span class="text-sm text-gray-500 w-4">${optionCount}.</span>
-                            <input 
-                                type="text" 
-                                placeholder="Opsi ${optionCount}" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
+                const container = card.querySelector('[data-option-container="true"]');
+                const controls = card.querySelector('.option-controls');
+                if (!container) {
+                    return;
                 }
-                
-                if (newOption && container) {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = newOption;
-                    const newOptionEl = tempDiv.firstElementChild;
-                    if (addSection && newOptionEl) {
-                        container.insertBefore(newOptionEl, addSection);
-                        attachOptionEvents(card);
-                        updateQuestionNumbers();
+                const optionCount = container.querySelectorAll('.option-item').length;
+                const type = card.getAttribute('data-question-type');
+                const newOptionEl = createOptionElementNode(type, '', optionCount);
+                if (newOptionEl) {
+                    if (controls) {
+                        container.insertBefore(newOptionEl, controls);
+                    } else {
+                        container.appendChild(newOptionEl);
                     }
+                    attachOptionEvents(card);
+                    updateQuestionNumbers();
                 }
             });
         }
@@ -2396,50 +2373,20 @@ function attachOptionEvents(card) {
         if (!btn.hasAttribute('data-listener')) {
             btn.setAttribute('data-listener', 'true');
             btn.addEventListener('click', function() {
-                const inputArea = card.querySelector('.question-input-area > div');
-                const optionCount = inputArea.querySelectorAll('.option-item').length + 1;
-                const type = card.getAttribute('data-question-type');
-                let newOption;
-                
-                if (type === 'multiple-choice') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                value="Lainnya" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else if (type === 'checkbox') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                value="Lainnya" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
+                const container = card.querySelector('[data-option-container="true"]');
+                if (!container) {
+                    return;
                 }
-                
-                if (newOption) {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = newOption;
-                    const addBtnContainer = btn.parentElement;
-                    addBtnContainer.insertBefore(tempDiv.firstElementChild, btn);
+                const controls = card.querySelector('.option-controls');
+                const optionCount = container.querySelectorAll('.option-item').length;
+                const type = card.getAttribute('data-question-type');
+                const newOptionEl = createOptionElementNode(type, 'Lainnya', optionCount);
+                if (newOptionEl) {
+                    if (controls) {
+                        container.insertBefore(newOptionEl, controls);
+                    } else {
+                        container.appendChild(newOptionEl);
+                    }
                     attachOptionEvents(card);
                 }
             });
@@ -2941,10 +2888,13 @@ function populateFormBuilder(data) {
     const sections = Array.isArray(data.sections) ? data.sections : [];
     const questions = Array.isArray(data.questions) ? data.questions : [];
 
+    const batchSize = questions.length > 8 ? 1 : 3;
+
     renderQuestionsIncrementally({
         questions,
         sections,
         container: questionsContainer,
+        batchSize,
         onComplete: () => {
             if (questions.length === 0) {
                 const defaultQuestion = createQuestionCard('short-answer');
