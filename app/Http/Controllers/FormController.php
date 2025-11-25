@@ -7,6 +7,7 @@ use App\Models\FormResponse;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class FormController extends Controller
@@ -61,12 +62,21 @@ class FormController extends Controller
      */
     public function create()
     {
+        $savedRules = auth()->check()
+            ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
+            : [];
+
+        $responseStats = $this->responseStats();
+
         return view('forms.create', [
             'formData' => null,
             'formMode' => 'create',
             'saveFormUrl' => route('forms.store'),
             'saveFormMethod' => 'POST',
             'formId' => null,
+            'shareUrl' => null,
+            'savedRules' => $savedRules,
+            'responsesStats' => $responseStats,
         ]);
     }
 
@@ -106,6 +116,7 @@ class FormController extends Controller
                 'answer_templates' => $request->input('answer_templates', []),
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
+                'result_settings' => $request->input('result_settings', []),
             ]);
 
             DB::commit();
@@ -114,6 +125,11 @@ class FormController extends Controller
                 'success' => true,
                 'message' => 'Form berhasil disimpan!',
                 'form_id' => $form->id,
+                'slug' => $form->slug,
+                'share_url' => route('forms.public.show', $form),
+                'edit_url' => route('forms.edit', $form),
+                'update_url' => route('forms.update', $form),
+                'save_method' => 'PUT',
             ]);
 
         } catch (\Exception $e) {
@@ -143,17 +159,27 @@ class FormController extends Controller
                     $optionQuery->orderBy('order');
                 }])->orderBy('order');
             },
-            'answerTemplates' => function ($query) {
-                $query->orderBy('order');
+            'answerTemplates' => function ($query) use ($form) {
+                $query->where('form_id', $form->id)->orderBy('order');
             },
-            'resultRules' => function ($query) {
-                $query->with(['texts' => function ($textQuery) {
-                    $textQuery->orderBy('order');
-                }])->orderBy('order');
+            'resultRules' => function ($query) use ($form) {
+                $query->where('form_id', $form->id)
+                    ->with(['texts' => function ($textQuery) {
+                        $textQuery->orderBy('order');
+                    }])->orderBy('order');
+            },
+            'resultSettings' => function ($query) {
+                $query->orderBy('order');
             },
         ]);
 
         $formData = $this->prepareFormBuilderData($form);
+
+        $savedRules = auth()->check()
+            ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
+            : [];
+
+        $responseStats = $this->responseStats($form, count($formData['questions'] ?? []));
 
         return view('forms.create', [
             'formData' => $formData,
@@ -161,6 +187,9 @@ class FormController extends Controller
             'saveFormUrl' => route('forms.update', $form),
             'saveFormMethod' => 'PUT',
             'formId' => $form->id,
+            'shareUrl' => route('forms.public.show', $form),
+            'savedRules' => $savedRules,
+            'responsesStats' => $responseStats,
         ]);
     }
 
@@ -189,7 +218,6 @@ class FormController extends Controller
             $form->update([
                 'title' => $request->title,
                 'description' => $request->description,
-                'slug' => Str::slug($request->title) . '-' . time(),
                 'theme_color' => $request->theme_color ?? 'red',
                 'collect_email' => $request->boolean('collect_email'),
                 'limit_one_response' => $request->boolean('limit_one_response'),
@@ -198,16 +226,31 @@ class FormController extends Controller
             ]);
 
             // Hapus relasi lama sebelum sinkronisasi ulang
+            // Gunakan DB::table untuk memastikan semua data benar-benar dihapus berdasarkan form_id
+            // Hapus result_rule_texts terlebih dahulu karena ada foreign key constraint
+            \DB::table('result_rule_texts')
+                ->whereIn('result_rule_id', function($query) use ($form) {
+                    $query->select('id')
+                        ->from('result_rules')
+                        ->where('form_id', $form->id);
+                })
+                ->delete();
+            
+            // Hapus semua data berdasarkan form_id
+            \DB::table('answer_templates')->where('form_id', $form->id)->delete();
+            \DB::table('result_rules')->where('form_id', $form->id)->delete();
+            \DB::table('result_settings')->where('form_id', $form->id)->delete();
+            
+            // Hapus questions dan sections setelah menghapus dependencies
             $form->questions()->delete();
             $form->sections()->delete();
-            $form->answerTemplates()->delete();
-            $form->resultRules()->delete();
 
             $this->syncFormRelations($form, [
                 'sections' => $request->input('sections', []),
                 'answer_templates' => $request->input('answer_templates', []),
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
+                'result_settings' => $request->input('result_settings', []),
             ]);
 
             DB::commit();
@@ -216,6 +259,11 @@ class FormController extends Controller
                 'success' => true,
                 'message' => 'Form berhasil diperbarui!',
                 'form_id' => $form->id,
+                'slug' => $form->slug,
+                'share_url' => route('forms.public.show', $form),
+                'edit_url' => route('forms.edit', $form),
+                'update_url' => route('forms.update', $form),
+                'save_method' => 'PUT',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -224,6 +272,56 @@ class FormController extends Controller
                 'message' => 'Terjadi kesalahan saat memperbarui form: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Menghapus answer template dari form.
+     */
+    public function destroyAnswerTemplate(Form $form, $templateId)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $template = $form->answerTemplates()->find($templateId);
+        if (!$template) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Template tidak ditemukan.',
+            ], 404);
+        }
+
+        $template->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Template berhasil dihapus.',
+        ]);
+    }
+
+    /**
+     * Menghapus result rule dari form.
+     */
+    public function destroyResultRule(Form $form, $ruleId)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $rule = $form->resultRules()->find($ruleId);
+        if (!$rule) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aturan tidak ditemukan.',
+            ], 404);
+        }
+
+        $rule->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Aturan berhasil dihapus.',
+        ]);
     }
 
     /**
@@ -254,6 +352,262 @@ class FormController extends Controller
     }
 
     /**
+     * Menampilkan halaman ringkasan dan detail jawaban.
+     */
+    public function responses(Form $form)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $responseData = $this->buildResponseData($form);
+
+        return view('forms.responses', [
+            'form' => $form,
+            'totalResponses' => $responseData['totalResponses'],
+            'questionSummaries' => collect($responseData['questionSummaries']),
+            'individualResponses' => collect($responseData['individualResponses']),
+        ]);
+    }
+
+    /**
+     * Memberikan data jawaban untuk tab builder secara asinkron.
+     */
+    public function responsesData(Form $form)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $data = $this->buildResponseData($form);
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    private function buildResponseData(Form $form): array
+    {
+        $form->loadMissing([
+            'questions' => function ($query) {
+                $query->with(['options' => function ($optionQuery) {
+                    $optionQuery->orderBy('order');
+                }])->orderBy('order');
+            },
+        ]);
+
+        $responses = $form->responses()
+            ->with(['answers.question', 'answers.questionOption'])
+            ->latest()
+            ->get();
+
+        $questionSummaries = $form->questions->map(function ($question) use ($responses) {
+            $answers = $responses->flatMap(function ($response) use ($question) {
+                return $response->answers->where('question_id', $question->id)->values();
+            });
+
+            $total = $answers->count();
+            $chart = null;
+            $textAnswers = null;
+
+            if (in_array($question->type, ['multiple-choice', 'dropdown', 'checkbox'])) {
+                $labels = [];
+                $counts = [];
+                foreach ($question->options as $option) {
+                    $labels[] = $option->text ?? 'Opsi';
+                    $counts[] = $answers->where('question_option_id', $option->id)->count();
+                }
+
+                $chartType = $question->type === 'checkbox' ? 'bar' : 'pie';
+                $chart = [
+                    'type' => $chartType,
+                    'labels' => $labels,
+                    'values' => $counts,
+                ];
+            } else {
+                $textAnswers = $answers->pluck('answer_text')->filter()->values()->take(50)->toArray();
+            }
+
+            return [
+                'id' => $question->id,
+                'title' => $question->title ?? 'Pertanyaan',
+                'type' => $question->type,
+                'total' => $total,
+                'chart' => $chart,
+                'text_answers' => $textAnswers,
+            ];
+        })->values()->toArray();
+
+        $individualResponses = $responses->map(function ($response) {
+            return [
+                'id' => $response->id,
+                'submitted_at' => optional($response->created_at)->format('d M Y H:i'),
+                'email' => $response->email,
+                'total_score' => $response->total_score,
+                'result_text' => $response->result_text,
+                'answers' => $response->answers->map(function ($answer) {
+                    return [
+                        'question' => $answer->question->title ?? 'Pertanyaan',
+                        'value' => $answer->questionOption->text ?? $answer->answer_text,
+                    ];
+                })->values()->toArray(),
+            ];
+        })->values()->toArray();
+
+        $latestResponse = $responses->first();
+
+        return [
+            'totalResponses' => $responses->count(),
+            'latestResponseAt' => $latestResponse && $latestResponse->created_at
+                ? $latestResponse->created_at->format('d M Y H:i')
+                : null,
+            'questionSummaries' => $questionSummaries,
+            'individualResponses' => $individualResponses,
+        ];
+    }
+
+    private function responseStats(?Form $form = null, int $questionCount = 0): array
+    {
+        if (!$form || !$form->exists) {
+            return [
+                'total_responses' => 0,
+                'question_count' => $questionCount,
+                'latest_response_at' => null,
+            ];
+        }
+
+        $totalResponses = $form->responses()->count();
+        $latest = $form->responses()->latest('created_at')->value('created_at');
+
+        return [
+            'total_responses' => $totalResponses,
+            'question_count' => $questionCount,
+            'latest_response_at' => $latest ? $latest->format('d M Y H:i') : null,
+        ];
+    }
+
+    private function makeTemplateLookupKey(array $templateData): ?string
+    {
+        $answerText = trim($templateData['answer_text'] ?? $templateData['text'] ?? '');
+        if ($answerText === '') {
+            return null;
+        }
+
+        $score = (int) ($templateData['score'] ?? 0);
+
+        return Str::lower($answerText) . '|' . $score;
+    }
+
+    private function processQuestionImage(?string $imageValue, Form $form): ?string
+    {
+        if ($imageValue === null || $imageValue === '') {
+            return null;
+        }
+
+        // If it's base64 data, process it
+        if (str_starts_with($imageValue, 'data:image')) {
+            return $this->storeBase64Image($imageValue, $form);
+        }
+
+        // If it's already a storage path (starts with "storage/"), return as-is
+        if (str_starts_with($imageValue, 'storage/')) {
+            return $imageValue;
+        }
+
+        // If it's a full URL, extract the storage path
+        if (str_starts_with($imageValue, 'http://') || str_starts_with($imageValue, 'https://')) {
+            $path = parse_url($imageValue, PHP_URL_PATH);
+            if ($path && str_starts_with($path, '/storage/')) {
+                return ltrim($path, '/');
+            }
+        }
+
+        // Otherwise, assume it's a storage path
+        return $imageValue;
+    }
+
+    private function storeBase64Image(string $base64, Form $form): string
+    {
+        if (!preg_match('/^data:image\/(\w+);base64,/', $base64, $type)) {
+            throw new \RuntimeException('Invalid image data.');
+        }
+
+        $extension = strtolower($type[1]);
+        $extension = $extension === 'jpeg' ? 'jpg' : $extension;
+        if (!in_array($extension, ['jpg', 'png'], true)) {
+            $extension = 'jpg';
+        }
+
+        $base64 = substr($base64, strpos($base64, ',') + 1);
+        $imageData = base64_decode($base64);
+
+        if ($imageData === false) {
+            throw new \RuntimeException('Failed to decode image.');
+        }
+
+        $image = \imagecreatefromstring($imageData);
+        if ($image === false) {
+            throw new \RuntimeException('Invalid image contents.');
+        }
+
+        $image = $this->resizeImageResource($image);
+
+        ob_start();
+        if ($extension === 'png') {
+            \imagepng($image, null, 8);
+        } else {
+            \imagejpeg($image, null, 85);
+            $extension = 'jpg';
+        }
+        $contents = ob_get_clean();
+        \imagedestroy($image);
+
+        if ($contents === false) {
+            throw new \RuntimeException('Unable to prepare image for storage.');
+        }
+
+        $directory = "question-images/{$form->id}";
+        $filename = Str::random(40) . '.' . $extension;
+        
+        // Ensure directory exists
+        Storage::disk('public')->makeDirectory($directory);
+        
+        // Store the file
+        Storage::disk('public')->put("{$directory}/{$filename}", $contents);
+
+        // Return path relative to public directory (for asset() helper)
+        return "storage/{$directory}/{$filename}";
+    }
+
+    /**
+     * Resize GD image resource while keeping aspect ratio.
+     *
+     * @param  \GdImage  $image
+     */
+    private function resizeImageResource($image, int $maxWidth = 1600)
+    {
+        $width = \imagesx($image);
+        $height = \imagesy($image);
+
+        if ($width <= $maxWidth) {
+            return $image;
+        }
+
+        $ratio = $maxWidth / $width;
+        $newWidth = $maxWidth;
+        $newHeight = (int) round($height * $ratio);
+
+        $resampled = \imagecreatetruecolor($newWidth, $newHeight);
+        \imagealphablending($resampled, false);
+        \imagesavealpha($resampled, true);
+        \imagecopyresampled($resampled, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+        \imagedestroy($image);
+
+        return $resampled;
+    }
+
+    /**
      * Sinkronisasi relasi form berdasarkan data dari request.
      */
     private function syncFormRelations(Form $form, array $payload): void
@@ -269,6 +623,9 @@ class FormController extends Controller
             $section = $form->sections()->create([
                 'title' => $sectionData['title'] ?? null,
                 'description' => $sectionData['description'] ?? null,
+                'image' => $this->processQuestionImage($sectionData['image'] ?? null, $form),
+                'image_alignment' => $sectionData['image_alignment'] ?? 'center',
+                'image_wrap_mode' => $sectionData['image_wrap_mode'] ?? 'fixed',
                 'order' => $index,
             ]);
 
@@ -277,6 +634,7 @@ class FormController extends Controller
 
         $answerTemplateIdMap = [];
         $answerTemplates = $payload['answer_templates'] ?? [];
+        $answerTemplateLookup = [];
 
         foreach ($answerTemplates as $index => $templateData) {
             if (!is_array($templateData)) {
@@ -289,15 +647,23 @@ class FormController extends Controller
             }
 
             $template = $form->answerTemplates()->create([
+                'form_id' => $form->id, // Explicitly set form_id to ensure it's bound to this form
                 'answer_text' => $answerText,
                 'score' => $templateData['score'] ?? 0,
                 'order' => $index,
             ]);
 
             $answerTemplateIdMap[$index] = $template->id;
+            $templateKey = $this->makeTemplateLookupKey($templateData);
+            if ($templateKey) {
+                $answerTemplateLookup[$templateKey] = $template->id;
+            }
         }
 
+        $nextTemplateOrder = count($answerTemplateLookup);
+
         $resultRules = $payload['result_rules'] ?? [];
+        $resultRuleIdMap = [];
 
         foreach ($resultRules as $index => $ruleData) {
             if (!is_array($ruleData)) {
@@ -305,12 +671,15 @@ class FormController extends Controller
             }
 
             $rule = $form->resultRules()->create([
+                'form_id' => $form->id, // Explicitly set form_id to ensure it's bound to this form
                 'condition_type' => $ruleData['condition_type'] ?? 'range',
                 'min_score' => $ruleData['min_score'] ?? null,
                 'max_score' => $ruleData['max_score'] ?? null,
                 'single_score' => $ruleData['single_score'] ?? null,
                 'order' => $index,
             ]);
+
+            $resultRuleIdMap[$index] = $rule->id;
 
             foreach ($ruleData['texts'] ?? [] as $textIndex => $text) {
                 $textValue = trim($text ?? '');
@@ -343,10 +712,36 @@ class FormController extends Controller
                 'type' => $questionData['type'] ?? 'short-answer',
                 'title' => $title !== '' ? $title : 'Pertanyaan tanpa judul',
                 'description' => $questionData['description'] ?? null,
-                'image' => $questionData['image'] ?? null,
+                'image' => $this->processQuestionImage($questionData['image'] ?? null, $form),
+                'image_alignment' => $questionData['image_alignment'] ?? 'center',
+                'image_width' => isset($questionData['image_width'])
+                    ? (int) $questionData['image_width']
+                    : null,
                 'is_required' => (bool) ($questionData['is_required'] ?? false),
                 'order' => $index,
             ]);
+
+            $savedRuleTemplateIds = [];
+            if (!empty($questionData['saved_rule']['templates']) && is_array($questionData['saved_rule']['templates'])) {
+                foreach ($questionData['saved_rule']['templates'] as $templateIndex => $templateData) {
+                    $templateKey = $this->makeTemplateLookupKey($templateData);
+                    if (!$templateKey) {
+                        continue;
+                    }
+
+                    if (!isset($answerTemplateLookup[$templateKey])) {
+                        $template = $form->answerTemplates()->create([
+                            'answer_text' => $templateData['answer_text'] ?? $templateData['text'] ?? 'Jawaban',
+                            'score' => $templateData['score'] ?? 0,
+                            'order' => $nextTemplateOrder++,
+                        ]);
+
+                        $answerTemplateLookup[$templateKey] = $template->id;
+                    }
+
+                    $savedRuleTemplateIds[$templateIndex] = $answerTemplateLookup[$templateKey];
+                }
+            }
 
             foreach ($questionData['options'] ?? [] as $optIndex => $optionData) {
                 if (!is_array($optionData)) {
@@ -359,8 +754,11 @@ class FormController extends Controller
                 }
 
                 $answerTemplateId = null;
-                if (isset($optionData['answer_template_id']) && array_key_exists($optionData['answer_template_id'], $answerTemplateIdMap)) {
-                    $answerTemplateId = $answerTemplateIdMap[$optionData['answer_template_id']];
+                $templateIndexReference = $optionData['answer_template_index'] ?? $optionData['answer_template_id'] ?? null;
+                if ($templateIndexReference !== null && array_key_exists($templateIndexReference, $answerTemplateIdMap)) {
+                    $answerTemplateId = $answerTemplateIdMap[$templateIndexReference];
+                } elseif (array_key_exists($optIndex, $savedRuleTemplateIds)) {
+                    $answerTemplateId = $savedRuleTemplateIds[$optIndex];
                 }
 
                 $question->options()->create([
@@ -369,6 +767,38 @@ class FormController extends Controller
                     'order' => $optIndex,
                 ]);
             }
+        }
+
+        // Handle result settings
+        $resultSettings = $payload['result_settings'] ?? [];
+        foreach ($resultSettings as $index => $settingData) {
+            if (!is_array($settingData)) {
+                continue;
+            }
+
+            $resultRuleId = null;
+            if (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
+                $resultRuleId = $resultRuleIdMap[$settingData['result_rule_index']];
+            }
+
+            // Get result text from result rule if not provided
+            $resultText = $settingData['result_text'] ?? null;
+            if (!$resultText && $resultRuleId) {
+                $rule = $form->resultRules()->find($resultRuleId);
+                if ($rule && $rule->texts->isNotEmpty()) {
+                    $resultText = $rule->texts->first()->result_text;
+                }
+            }
+
+            $form->resultSettings()->create([
+                'form_id' => $form->id, // Explicitly set form_id
+                'result_rule_id' => $resultRuleId,
+                'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
+                'image_alignment' => $settingData['image_alignment'] ?? 'center',
+                'result_text' => $resultText,
+                'text_alignment' => $settingData['text_alignment'] ?? 'center',
+                'order' => $index,
+            ]);
         }
     }
 
@@ -386,18 +816,41 @@ class FormController extends Controller
             return [
                 'title' => $section->title,
                 'description' => $section->description,
+                'image' => $section->image,
+                'image_alignment' => $section->image_alignment ?? 'center',
+                'image_wrap_mode' => $section->image_wrap_mode ?? 'fixed',
+                'image_url' => $section->image ? asset($section->image) : null,
             ];
         })->toArray();
+
+        $answerTemplatesCollection = $form->answerTemplates
+            ->sortBy('order')
+            ->values();
+
+        $answerTemplateIndexMap = [];
+        $answerTemplatesData = $answerTemplatesCollection
+            ->map(function ($template, $index) use (&$answerTemplateIndexMap) {
+                $answerTemplateIndexMap[$template->id] = $index;
+
+                return [
+                    'id' => $template->id,
+                    'answer_text' => $template->answer_text,
+                    'score' => $template->score,
+                ];
+            })->toArray();
 
         $questionsData = $form->questions
             ->sortBy('order')
             ->values()
-            ->map(function ($question) use ($sectionIndexMap) {
+            ->map(function ($question) use ($sectionIndexMap, $answerTemplateIndexMap) {
                 $questionData = [
                     'type' => $question->type,
                     'title' => $question->title,
                     'description' => $question->description,
                     'image' => $question->image,
+                    'image_alignment' => $question->image_alignment ?? 'center',
+                    'image_width' => $question->image_width ?? 100,
+                    'image_url' => $question->image ? asset($question->image) : null,
                     'is_required' => (bool) $question->is_required,
                     'options' => [],
                 ];
@@ -409,24 +862,16 @@ class FormController extends Controller
                 $questionData['options'] = $question->options
                     ->sortBy('order')
                     ->values()
-                    ->map(function ($option) {
+                    ->map(function ($option) use ($answerTemplateIndexMap) {
                         return [
                             'text' => $option->text,
-                            'answer_template_id' => null,
+                            'answer_template_index' => $option->answer_template_id !== null && isset($answerTemplateIndexMap[$option->answer_template_id])
+                                ? $answerTemplateIndexMap[$option->answer_template_id]
+                                : null,
                         ];
                     })->toArray();
 
                 return $questionData;
-            })->toArray();
-
-        $answerTemplatesData = $form->answerTemplates
-            ->sortBy('order')
-            ->values()
-            ->map(function ($template) {
-                return [
-                    'answer_text' => $template->answer_text,
-                    'score' => $template->score,
-                ];
             })->toArray();
 
         $resultRulesData = $form->resultRules
@@ -445,8 +890,23 @@ class FormController extends Controller
                 ];
             })->toArray();
 
+        $resultSettingsData = $form->resultSettings
+            ->sortBy('order')
+            ->values()
+            ->map(function ($setting) {
+                return [
+                    'result_rule_id' => $setting->result_rule_id,
+                    'image' => $setting->image,
+                    'image_alignment' => $setting->image_alignment ?? 'center',
+                    'result_text' => $setting->result_text,
+                    'text_alignment' => $setting->text_alignment ?? 'center',
+                    'image_url' => $setting->image ? asset($setting->image) : null,
+                ];
+            })->toArray();
+
         return [
             'id' => $form->id,
+            'slug' => $form->slug,
             'title' => $form->title,
             'description' => $form->description,
             'theme_color' => $form->theme_color,
@@ -454,10 +914,12 @@ class FormController extends Controller
             'limit_one_response' => (bool) $form->limit_one_response,
             'show_progress_bar' => (bool) $form->show_progress_bar,
             'shuffle_questions' => (bool) $form->shuffle_questions,
+            'share_url' => route('forms.public.show', $form),
             'sections' => $sectionsData,
             'questions' => $questionsData,
             'answer_templates' => $answerTemplatesData,
             'result_rules' => $resultRulesData,
+            'result_settings' => $resultSettingsData,
         ];
     }
 }

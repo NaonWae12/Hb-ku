@@ -19,6 +19,7 @@
 /storage/*.key
 /storage/pail
 /vendor
+hb-ku_v1_bc6/
 Homestead.json
 Homestead.yaml
 Thumbs.db

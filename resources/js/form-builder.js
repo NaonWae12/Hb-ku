@@ -2,34 +2,1068 @@
 console.log('Form Builder JS loaded');
 let questionCounter = 0;
 let sectionCounter = 0;
+let requestBuilderResponsesData = null;
+let chartJsLoadingPromise = null;
+const dragAndDropState = {
+    container: null,
+    source: null,
+    placeholder: null,
+};
+
+function getMetaContent(name) {
+    return document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
+}
+
+function setMetaContent(name, value) {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    if (meta) {
+        meta.setAttribute('content', value);
+    }
+}
+
+function getAnswerTemplatesPlaceholder() {
+    return '<div class="answer-templates-placeholder text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+}
+
+function getResultRulesPlaceholder() {
+    return '<div class="result-rules-placeholder text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
+}
+
+// Function to update main buttons visibility
+function updateMainButtonsVisibility() {
+    const addQuestionBtn = document.getElementById('add-question-btn');
+    const addSectionBtn = document.getElementById('add-section-btn');
+    const buttonsContainer = addQuestionBtn?.parentElement;
+    const questionsContainer = document.getElementById('questions-container');
+    
+    if (!questionsContainer) return;
+    
+    const questionCards = questionsContainer.querySelectorAll('.question-card');
+    const hasQuestions = questionCards.length > 0;
+    
+    if (buttonsContainer) {
+        if (hasQuestions) {
+            buttonsContainer.classList.add('hidden');
+        } else {
+            buttonsContainer.classList.remove('hidden');
+        }
+    }
+}
+
+function resetFormRulesBuilder() {
+    const answerTemplatesContainer = document.getElementById('answer-templates-container');
+    if (answerTemplatesContainer) {
+        answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
+    }
+
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    if (resultRulesContainer) {
+        resultRulesContainer.innerHTML = getResultRulesPlaceholder();
+    }
+
+    answerTemplateCounter = 0;
+    resultRuleCounter = 0;
+    updateRuleSaveControlsVisibility();
+}
+
+function ensureChartJsLoaded() {
+    if (window.Chart) {
+        return Promise.resolve();
+    }
+
+    if (!chartJsLoadingPromise) {
+        chartJsLoadingPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('Gagal memuat Chart.js'));
+            document.head.appendChild(script);
+        });
+    }
+
+    return chartJsLoadingPromise;
+}
+
+function triggerResponsesFetch() {
+    if (typeof requestBuilderResponsesData === 'function') {
+        requestBuilderResponsesData();
+    }
+}
+
+function enableDragHandle(element) {
+    if (!element || element.dataset.dragHandleInit === 'true') {
+        return;
+    }
+
+    const handle = element.querySelector('[data-drag-handle]');
+    if (!handle) {
+        return;
+    }
+
+    element.dataset.dragHandleInit = 'true';
+    element.dataset.dragReady = 'false';
+    element.dataset.dragging = 'false';
+    element.setAttribute('draggable', 'true');
+
+    handle.setAttribute('draggable', 'false');
+    handle.addEventListener('dragstart', (event) => event.preventDefault());
+
+    const enable = () => {
+        element.dataset.dragReady = 'true';
+    };
+
+    const disable = () => {
+        if (element.dataset.dragging !== 'true') {
+            element.dataset.dragReady = 'false';
+        }
+    };
+
+    ['mousedown', 'touchstart'].forEach((eventName) => {
+        handle.addEventListener(eventName, enable, { passive: true });
+    });
+
+    ['mouseup', 'touchend', 'touchcancel'].forEach((eventName) => {
+        handle.addEventListener(eventName, disable, { passive: true });
+    });
+}
+
+function createDragPlaceholder(target) {
+    const isSection = target.classList.contains('section-divider');
+    const placeholder = document.createElement('div');
+    placeholder.className = isSection
+        ? 'section-divider placeholder border-2 border-dashed border-red-300 rounded-lg my-2'
+        : 'question-card placeholder border-2 border-dashed border-red-300 rounded-lg my-2';
+    placeholder.style.height = `${target.getBoundingClientRect().height}px`;
+    placeholder.style.backgroundColor = '#fff';
+    return placeholder;
+}
+
+function handleDragStart(event) {
+    const target = event.currentTarget;
+    dragAndDropState.source = target;
+    target.classList.add('opacity-60', 'ring-2', 'ring-red-300');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', '');
+
+    dragAndDropState.placeholder = createDragPlaceholder(target);
+}
+
+function handleDragEnd() {
+    if (dragAndDropState.source) {
+        dragAndDropState.source.classList.remove('opacity-60', 'ring-2', 'ring-red-300');
+    }
+    if (dragAndDropState.placeholder && dragAndDropState.placeholder.parentNode) {
+        dragAndDropState.placeholder.parentNode.removeChild(dragAndDropState.placeholder);
+    }
+    dragAndDropState.source = null;
+    dragAndDropState.placeholder = null;
+    updateSectionNumbers();
+    updateQuestionNumbers();
+}
+
+function handleDragOver(event) {
+    if (!dragAndDropState.container || !dragAndDropState.placeholder) {
+        return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+
+    const targetCard = event.target.closest('.question-card, .section-divider');
+    const container = dragAndDropState.container;
+
+    if (!targetCard || targetCard === dragAndDropState.source || targetCard === dragAndDropState.placeholder) {
+        if (!targetCard && dragAndDropState.placeholder.parentNode !== container) {
+            container.appendChild(dragAndDropState.placeholder);
+        }
+        return;
+    }
+
+    const bounding = targetCard.getBoundingClientRect();
+    const offset = bounding.y + (bounding.height / 2);
+    const parent = targetCard.parentNode || container;
+
+    if (!dragAndDropState.placeholder.parentNode) {
+        parent.insertBefore(dragAndDropState.placeholder, targetCard);
+    } else if (event.clientY > offset) {
+        parent.insertBefore(dragAndDropState.placeholder, targetCard.nextSibling);
+    } else {
+        parent.insertBefore(dragAndDropState.placeholder, targetCard);
+    }
+}
+
+function handleDrop(event) {
+    event.preventDefault();
+    if (dragAndDropState.placeholder && dragAndDropState.source && dragAndDropState.placeholder.parentNode === dragAndDropState.container) {
+        dragAndDropState.container.insertBefore(dragAndDropState.source, dragAndDropState.placeholder);
+    }
+}
+
+function initializeDraggable(element) {
+    if (element.dataset.dragEnabled === 'true') {
+        return;
+    }
+    element.dataset.dragEnabled = 'true';
+    element.setAttribute('draggable', 'true');
+    enableDragHandle(element);
+    element.addEventListener('dragstart', handleDragStart);
+    element.addEventListener('dragend', handleDragEnd);
+}
+
+function refreshDraggableElements(container) {
+    container.querySelectorAll('.question-card, .section-divider').forEach(initializeDraggable);
+}
+
+function initSortable() {
+    const container = document.getElementById('questions-container');
+    if (!container) {
+        return;
+    }
+
+    if (dragAndDropState.container !== container) {
+        dragAndDropState.container = container;
+        container.addEventListener('dragover', handleDragOver);
+        container.addEventListener('drop', handleDrop);
+    }
+
+    refreshDraggableElements(container);
+}
+
+function renderQuestionsIncrementally({ questions, sections, container, onComplete, batchSize = 3 }) {
+    const questionList = Array.isArray(questions) ? questions : [];
+    const sectionList = Array.isArray(sections) ? sections : [];
+
+    if (!container) {
+        if (typeof onComplete === 'function') {
+            onComplete();
+        }
+        return;
+    }
+
+    let questionIndex = 0;
+    let currentSectionIndex = -1;
+    const totalQuestions = questionList.length;
+
+    const renderSingleQuestion = (questionData = {}) => {
+        if (
+            questionData.section_id !== undefined &&
+            questionData.section_id !== null &&
+            questionData.section_id !== currentSectionIndex
+        ) {
+            currentSectionIndex = questionData.section_id;
+            const sectionDivider = createSectionDivider();
+            container.appendChild(sectionDivider);
+
+            const sectionInfo = sectionList[currentSectionIndex] || null;
+            const sectionTitleInput = sectionDivider.querySelector('.section-title-input');
+            const sectionDescInput = sectionDivider.querySelector('.section-description-input');
+            const sectionImage = sectionDivider.querySelector('.section-image');
+            const sectionImageArea = sectionDivider.querySelector('.section-image-area');
+            const sectionImageValueInput = sectionDivider.querySelector('.section-image-value');
+            const sectionImageSettings = sectionDivider.querySelector('.section-image-settings');
+            const sectionAlignmentSelect = sectionDivider.querySelector('.section-image-alignment-select');
+            const sectionWrapModeSelect = sectionDivider.querySelector('.section-image-wrap-mode-select');
+            
+            if (sectionTitleInput) {
+                sectionTitleInput.value = sectionInfo && sectionInfo.title
+                    ? sectionInfo.title
+                    : `Bagian ${currentSectionIndex + 1}`;
+            }
+            
+            if (sectionDescInput && sectionInfo && sectionInfo.description) {
+                sectionDescInput.value = sectionInfo.description;
+            }
+            
+            // Handle section image
+            const existingImageSrc = sectionInfo?.image_url || sectionInfo?.image || '';
+            const existingImagePath = sectionInfo?.image || '';
+            
+            if (existingImageSrc && sectionImage && sectionImageArea) {
+                sectionImage.src = existingImageSrc;
+                sectionImageArea.classList.remove('hidden');
+                sectionImageSettings?.classList.remove('hidden');
+            }
+            
+            if (sectionImageValueInput) {
+                let imagePath = existingImagePath;
+                if (imagePath && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
+                    try {
+                        const urlPath = new URL(imagePath).pathname;
+                        imagePath = urlPath.startsWith('/') ? urlPath.substring(1) : urlPath;
+                    } catch (e) {
+                        const match = imagePath.match(/\/storage\/.+$/);
+                        if (match) {
+                            imagePath = match[0].substring(1);
+                        }
+                    }
+                }
+                sectionImageValueInput.value = imagePath || '';
+            }
+            
+            if (sectionAlignmentSelect) {
+                sectionAlignmentSelect.value = sectionInfo?.image_alignment ?? 'center';
+            }
+            
+            if (sectionWrapModeSelect) {
+                sectionWrapModeSelect.value = sectionInfo?.image_wrap_mode ?? 'fixed';
+            }
+            
+            // Attach section events (this will set up updateImageStyle function and event listeners)
+            attachSectionEvents(sectionDivider);
+            
+            // Apply image style after loading - trigger change event to apply style
+            if (existingImageSrc && sectionImage) {
+                // Wait a bit for attachSectionEvents to finish setting up
+                setTimeout(() => {
+                    // Trigger change events to apply style
+                    if (sectionAlignmentSelect) {
+                        sectionAlignmentSelect.dispatchEvent(new Event('change'));
+                    }
+                    if (sectionWrapModeSelect) {
+                        sectionWrapModeSelect.dispatchEvent(new Event('change'));
+                    }
+                }, 50);
+            }
+
+            const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', function () {
+                    sectionDivider.remove();
+                    updateSectionNumbers();
+                    updateMainButtonsVisibility();
+                });
+            }
+        }
+
+        const questionType = questionData.type || 'short-answer';
+        const questionCard = createQuestionCard(questionType);
+        container.appendChild(questionCard);
+
+        const titleInput = questionCard.querySelector('.question-title');
+        if (titleInput) {
+            titleInput.value = questionData.title || '';
+        }
+
+        const requiredCheckbox = questionCard.querySelector('.required-checkbox');
+        if (requiredCheckbox) {
+            requiredCheckbox.checked = Boolean(questionData.is_required);
+        }
+
+        const questionImage = questionCard.querySelector('.question-image');
+        const imageArea = questionCard.querySelector('.question-image-area');
+        const imageValueInput = questionCard.querySelector('.question-image-value');
+        const imageSettings = questionCard.querySelector('.question-image-settings');
+        const alignmentSelect = questionCard.querySelector('.image-alignment-select');
+        const widthRange = questionCard.querySelector('.image-width-range');
+        const widthDisplay = questionCard.querySelector('.image-width-display');
+        const existingImageSrc = questionData.image_url || questionData.image || '';
+        const existingImagePath = questionData.image || '';
+
+        // Set image display (use full URL for display)
+        if (existingImageSrc && questionImage && imageArea) {
+            questionImage.src = existingImageSrc;
+            imageArea.classList.remove('hidden');
+            imageSettings?.classList.remove('hidden');
+        } else if (questionImage && imageArea) {
+            questionImage.removeAttribute('src');
+            imageArea.classList.add('hidden');
+            imageSettings?.classList.add('hidden');
+        }
+
+        // Set image value input (use storage path, not full URL)
+        if (imageValueInput) {
+            // If image is a full URL, extract the path part
+            let imagePath = existingImagePath;
+            if (imagePath && (imagePath.startsWith('http://') || imagePath.startsWith('https://'))) {
+                try {
+                    const urlPath = new URL(imagePath).pathname;
+                    imagePath = urlPath.startsWith('/') ? urlPath.substring(1) : urlPath;
+                } catch (e) {
+                    // If URL parsing fails, try to extract path manually
+                    const match = imagePath.match(/\/storage\/.+$/);
+                    if (match) {
+                        imagePath = match[0].substring(1); // Remove leading /
+                    }
+                }
+            }
+            imageValueInput.value = imagePath || '';
+        }
+
+        // Set alignment
+        if (alignmentSelect) {
+            alignmentSelect.value = questionData.image_alignment ?? 'center';
+        }
+
+        // Set width
+        if (widthRange) {
+            const widthValue = questionData.image_width ?? 100;
+            widthRange.value = widthValue;
+            if (widthDisplay) {
+                widthDisplay.textContent = `${widthValue}%`;
+            }
+        }
+
+        const extraSettings = questionData.extra_settings || {};
+        const validationInput = questionCard.querySelector('.question-validation-input');
+        const validationMessageInput = questionCard.querySelector('.question-validation-message');
+        const extraNotesInput = questionCard.querySelector('.question-extra-notes');
+        const minLengthInput = questionCard.querySelector('.question-min-length');
+        const maxLengthInput = questionCard.querySelector('.question-max-length');
+        const advancedSettingsPanel = questionCard.querySelector('.question-advanced-settings');
+
+        const hasExtraSettings = [
+            extraSettings.validation,
+            extraSettings.validation_message,
+            extraSettings.extra_notes,
+            extraSettings.min_length,
+            extraSettings.max_length,
+        ].some(value => value !== null && value !== undefined && value !== '');
+
+        if (validationInput && extraSettings.validation) {
+            validationInput.value = extraSettings.validation;
+        }
+        if (validationMessageInput && extraSettings.validation_message) {
+            validationMessageInput.value = extraSettings.validation_message;
+        }
+        if (extraNotesInput && extraSettings.extra_notes) {
+            extraNotesInput.value = extraSettings.extra_notes;
+        }
+        if (minLengthInput && extraSettings.min_length !== null && extraSettings.min_length !== undefined) {
+            minLengthInput.value = extraSettings.min_length;
+        }
+        if (maxLengthInput && extraSettings.max_length !== null && extraSettings.max_length !== undefined) {
+            maxLengthInput.value = extraSettings.max_length;
+        }
+        if (hasExtraSettings && advancedSettingsPanel) {
+            advancedSettingsPanel.classList.remove('hidden');
+        }
+
+        if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionType)) {
+            const options = Array.isArray(questionData.options) ? questionData.options : [];
+            setQuestionOptions(questionCard, questionType, options);
+        }
+
+        if (questionData.saved_rule) {
+            applySavedRuleToQuestion(questionCard, questionData.saved_rule);
+        }
+
+        attachQuestionCardEvents(questionCard);
+
+        const requiredCheckboxEl = questionCard.querySelector('.required-checkbox');
+        if (requiredCheckboxEl) {
+            requiredCheckboxEl.dispatchEvent(new Event('change'));
+        }
+    };
+
+    const processBatch = () => {
+        let processed = 0;
+        while (questionIndex < totalQuestions && processed < batchSize) {
+            renderSingleQuestion(questionList[questionIndex]);
+            questionIndex += 1;
+            processed += 1;
+        }
+
+        if (questionIndex < totalQuestions) {
+            requestAnimationFrame(processBatch);
+        } else if (typeof onComplete === 'function') {
+            onComplete();
+        }
+    };
+
+    if (totalQuestions === 0) {
+        if (typeof onComplete === 'function') {
+            onComplete();
+        }
+        return;
+    }
+
+    requestAnimationFrame(processBatch);
+    initSortable();
+}
+
+function createOptionElementNode(type, text = '', index = 0, templateIndex = null) {
+    const optionItem = document.createElement('div');
+    optionItem.className = 'option-item flex items-center space-x-2';
+
+    if (type === 'multiple-choice') {
+        const indicator = document.createElement('span');
+        indicator.className = 'w-3 h-3 rounded-full border border-gray-300';
+        optionItem.appendChild(indicator);
+    } else if (type === 'checkbox') {
+        const indicator = document.createElement('span');
+        indicator.className = 'w-3 h-3 border border-gray-300 rounded mt-1';
+        optionItem.appendChild(indicator);
+    } else if (type === 'dropdown') {
+        const order = document.createElement('span');
+        order.className = 'text-sm text-gray-500 w-4';
+        order.textContent = `${index + 1}.`;
+        optionItem.appendChild(order);
+    }
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = `Opsi ${index + 1}`;
+    input.value = text || '';
+    input.className = 'flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input';
+    if (templateIndex !== null && templateIndex !== undefined && templateIndex !== '') {
+        input.dataset.templateIndex = templateIndex;
+        optionItem.dataset.templateIndex = templateIndex;
+    } else {
+        delete input.dataset.templateIndex;
+        optionItem.removeAttribute('data-template-index');
+    }
+    optionItem.appendChild(input);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100';
+    removeBtn.title = 'Hapus opsi';
+    removeBtn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+    `;
+    optionItem.appendChild(removeBtn);
+
+    return optionItem;
+}
+
+function setQuestionOptions(card, questionType, options) {
+    const container = card.querySelector('[data-option-container="true"]');
+    if (!container) {
+        return;
+    }
+
+    const controls = container.querySelector('.option-controls');
+    const savedRulesWrapper = container.querySelector('.use-saved-rules-wrapper');
+    const insertBeforeNode = controls || savedRulesWrapper || null;
+
+    const existingOptions = container.querySelectorAll('.option-item');
+    existingOptions.forEach(item => item.remove());
+
+    const normalizedOptions = options.length
+        ? options
+        : (questionType === 'dropdown' ? [{}, {}] : [{}, {}]);
+
+    normalizedOptions.forEach((option, idx) => {
+        const templateIndex = option?.answer_template_index ?? option?.answer_template_id ?? null;
+        const optionNode = createOptionElementNode(questionType, option?.text || '', idx, templateIndex);
+        if (insertBeforeNode) {
+            container.insertBefore(optionNode, insertBeforeNode);
+        } else {
+            container.appendChild(optionNode);
+        }
+    });
+}
+
+function hydrateRuleBuilderFromPreset(preset) {
+    const normalized = normalizeSavedRule(preset);
+    const answerTemplatesContainer = document.getElementById('answer-templates-container');
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    if (!answerTemplatesContainer || !resultRulesContainer) {
+        return;
+    }
+
+    resetFormRulesBuilder();
+
+    if (normalized.templates?.length) {
+        answerTemplatesContainer.innerHTML = '';
+        normalized.templates.forEach((template) => {
+            const card = appendAnswerTemplateCard(answerTemplatesContainer);
+            const textInput = card.querySelector('.answer-template-text');
+            const scoreInput = card.querySelector('.answer-template-score');
+            if (textInput) {
+                textInput.value = template.answer_text || '';
+            }
+            if (scoreInput) {
+                scoreInput.value = template.score ?? 0;
+            }
+        });
+    }
+
+    if (normalized.result_rules?.length) {
+        resultRulesContainer.innerHTML = '';
+        normalized.result_rules.forEach((rule) => {
+            const ruleCard = appendResultRuleCard(resultRulesContainer);
+            const conditionSelect = ruleCard.querySelector('.rule-condition-type');
+            if (conditionSelect) {
+                conditionSelect.value = rule.condition_type || 'range';
+                conditionSelect.dispatchEvent(new Event('change'));
+            }
+
+            if ((rule.condition_type || 'range') === 'range') {
+                const minInput = ruleCard.querySelector('.rule-min-score');
+                const maxInput = ruleCard.querySelector('.rule-max-score');
+                if (minInput) {
+                    minInput.value = rule.min_score ?? '';
+                }
+                if (maxInput) {
+                    maxInput.value = rule.max_score ?? '';
+                }
+            } else {
+                const singleInput = ruleCard.querySelector('.rule-single-score');
+                if (singleInput) {
+                    singleInput.value = rule.single_score ?? '';
+                }
+            }
+
+            const resultTextsContainer = ruleCard.querySelector('.rule-result-texts');
+            const addTextBtn = ruleCard.querySelector('.add-result-text-btn');
+            const texts = Array.isArray(rule.texts) && rule.texts.length ? rule.texts : [''];
+            texts.forEach((text, idx) => {
+                if (idx === 0) {
+                    const textarea = resultTextsContainer?.querySelector('.rule-result-text');
+                    if (textarea) {
+                        textarea.value = text || '';
+                    }
+                } else if (addTextBtn) {
+                    addTextBtn.click();
+                    const textareas = resultTextsContainer?.querySelectorAll('.rule-result-text');
+                    const textarea = textareas ? textareas[textareas.length - 1] : null;
+                    if (textarea) {
+                        textarea.value = text || '';
+                    }
+                }
+            });
+        });
+    }
+
+    updateRuleSaveControlsVisibility();
+}
 
 // Fungsi untuk membuat section divider
 function createSectionDivider() {
     sectionCounter++;
     const sectionDivider = document.createElement('div');
-    sectionDivider.className = 'section-divider bg-white rounded-lg shadow-sm border-2 border-dashed border-gray-300 p-6 my-6';
+    sectionDivider.className = 'section-divider bg-white rounded-lg shadow-sm border-2 border-dashed border-gray-300 p-6 my-6 group';
     sectionDivider.setAttribute('data-section-id', sectionCounter);
     sectionDivider.innerHTML = `
-        <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                    <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                    </svg>
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <div class="flex items-center space-x-3 mb-4">
+                    <button type="button" class="drag-handle p-2 text-gray-400 hover:text-red-600 rounded-full bg-white/80 shadow cursor-grab focus:outline-none" data-drag-handle>
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M3 12h18M3 6h18M3 18h18"></path>
+                        </svg>
+                    </button>
+                    <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <input 
+                            type="text" 
+                            placeholder="Judul Bagian" 
+                            class="section-title-input w-full text-lg font-medium text-gray-900 border-none outline-none focus:ring-0 placeholder-gray-400 pb-1 border-b-2 border-transparent focus:border-red-600 transition-colors"
+                            value="Bagian ${sectionCounter}"
+                        >
+                        <textarea 
+                            placeholder="Deskripsi bagian (opsional)" 
+                            rows="2"
+                            class="section-description-input w-full mt-2 text-sm text-gray-500 border-none outline-none focus:ring-0 placeholder-gray-400 pb-1 border-b border-transparent focus:border-red-600 transition-colors resize-none"
+                        ></textarea>
+                    </div>
                 </div>
-                <div>
-                    <h3 class="text-lg font-medium text-gray-900 section-title">Bagian ${sectionCounter}</h3>
-                    <p class="text-sm text-gray-500">Pertanyaan di bawah ini akan ditampilkan di halaman terpisah</p>
+                
+                <!-- Image Display Area -->
+                <div class="section-image-area mb-4 hidden">
+                    <div class="relative inline-block">
+                        <img src="" alt="Section image" class="max-w-full h-auto rounded-lg border border-gray-200 section-image" style="max-height: 300px;">
+                        <button class="remove-section-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Hidden File Input -->
+                <input type="file" accept="image/*" class="hidden section-image-file-input" data-section-id="${sectionCounter}">
+                <input type="hidden" class="section-image-value">
+                
+                <!-- Image Settings -->
+                <div class="section-image-settings hidden mt-4 space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Posisi gambar</label>
+                        <select class="section-image-alignment-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Wrapping gambar</label>
+                        <select class="section-image-wrap-mode-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="fixed" selected>Ukuran asli (Fixed)</option>
+                            <option value="fit">Sesuai kartu (Fit dengan scale-up)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-            <button class="delete-section-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus bagian">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-            </button>
+            
+            <div class="flex flex-col items-end space-y-2 ml-4">
+                <button class="add-section-image-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Tambahkan gambar">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                </button>
+                <button class="delete-section-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus bagian">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
+            </div>
         </div>
     `;
     return sectionDivider;
+}
+
+// Function to attach events to section divider
+function attachSectionEvents(sectionDivider) {
+    const addImageBtn = sectionDivider.querySelector('.add-section-image-btn');
+    const imageFileInput = sectionDivider.querySelector('.section-image-file-input');
+    const imageArea = sectionDivider.querySelector('.section-image-area');
+    const sectionImage = sectionDivider.querySelector('.section-image');
+    const removeImageBtn = sectionDivider.querySelector('.remove-section-image-btn');
+    const imageValueInput = sectionDivider.querySelector('.section-image-value');
+    const imageSettings = sectionDivider.querySelector('.section-image-settings');
+    const alignmentSelect = sectionDivider.querySelector('.section-image-alignment-select');
+    const wrapModeSelect = sectionDivider.querySelector('.section-image-wrap-mode-select');
+    
+    // Function to update image style based on alignment and wrap mode
+    const updateImageStyle = () => {
+        if (!sectionImage || !imageArea) return;
+        
+        const alignment = alignmentSelect?.value || 'center';
+        const wrapMode = wrapModeSelect?.value || 'fixed';
+        
+        // Update alignment class
+        imageArea.classList.remove('text-left', 'text-center', 'text-right');
+        imageArea.classList.add(
+            alignment === 'left' ? 'text-left' : 
+            alignment === 'right' ? 'text-right' : 
+            'text-center'
+        );
+        
+        // Update wrap mode style
+        if (wrapMode === 'fit') {
+            sectionImage.style.width = '100%';
+            sectionImage.style.maxWidth = '100%';
+            sectionImage.style.height = 'auto';
+            sectionImage.style.objectFit = 'cover';
+        } else {
+            sectionImage.style.width = 'auto';
+            sectionImage.style.maxWidth = '100%';
+            sectionImage.style.height = 'auto';
+            sectionImage.style.objectFit = 'contain';
+        }
+    };
+    
+    const showImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.remove('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.remove('hidden');
+        }
+        updateImageStyle();
+    };
+    
+    const hideImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.add('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.add('hidden');
+        }
+    };
+    
+    if (addImageBtn && imageFileInput) {
+        addImageBtn.addEventListener('click', function() {
+            imageFileInput.click();
+        });
+    }
+    
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    if (sectionImage) {
+                        sectionImage.src = e.target.result;
+                        // Wait for image to load then apply style
+                        sectionImage.addEventListener('load', function() {
+                            updateImageStyle();
+                        }, { once: true });
+                    }
+                    if (imageValueInput) {
+                        imageValueInput.value = e.target.result;
+                    }
+                    showImageControls();
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+    
+    if (sectionImage) {
+        sectionImage.addEventListener('error', function() {
+            sectionImage.removeAttribute('src');
+            hideImageControls();
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+        });
+    }
+    
+    if (removeImageBtn) {
+        removeImageBtn.addEventListener('click', function() {
+            hideImageControls();
+            if (sectionImage) {
+                sectionImage.src = '';
+            }
+            if (imageFileInput) {
+                imageFileInput.value = '';
+            }
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+            if (alignmentSelect) {
+                alignmentSelect.value = 'center';
+            }
+            if (wrapModeSelect) {
+                wrapModeSelect.value = 'fixed';
+            }
+        });
+    }
+    
+    // Update image style when alignment changes
+    if (alignmentSelect) {
+        alignmentSelect.addEventListener('change', function() {
+            updateImageStyle();
+        });
+    }
+    
+    // Update image style when wrap mode changes
+    if (wrapModeSelect) {
+        wrapModeSelect.addEventListener('change', function() {
+            updateImageStyle();
+        });
+    }
+    
+    // Initial style update if image already exists
+    if (sectionImage && sectionImage.src) {
+        updateImageStyle();
+    }
+}
+
+// Function to create result setting card
+let resultSettingCounter = 0;
+function createResultSettingCard() {
+    resultSettingCounter++;
+    const card = document.createElement('div');
+    card.className = 'result-setting-card bg-white rounded-lg shadow-sm border-2 border-gray-200 p-6 my-6';
+    card.setAttribute('data-result-setting-id', resultSettingCounter);
+    
+    // Get result rules from settings tab
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    const resultRules = resultRulesContainer ? Array.from(resultRulesContainer.querySelectorAll('.result-rule-card')) : [];
+    
+    // Get result rule options
+    const resultRuleOptions = resultRules.map((ruleCard, index) => {
+        const conditionType = ruleCard.querySelector('.rule-condition-type')?.value || 'range';
+        const texts = Array.from(ruleCard.querySelectorAll('.rule-result-text')).map(ta => ta.value.trim()).filter(t => t);
+        const firstText = texts[0] || '';
+        
+        let label = '';
+        if (conditionType === 'range') {
+            const min = ruleCard.querySelector('.rule-min-score')?.value || '';
+            const max = ruleCard.querySelector('.rule-max-score')?.value || '';
+            label = `Range ${min}-${max}`;
+        } else {
+            const single = ruleCard.querySelector('.rule-single-score')?.value || '';
+            label = `${conditionType} ${single}`;
+        }
+        
+        return `<option value="${index}">${label}${firstText ? ' - ' + firstText.substring(0, 30) : ''}</option>`;
+    }).join('');
+    
+    card.innerHTML = `
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <div class="flex items-center space-x-3 mb-4">
+                    <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Pilih Aturan Hasil</label>
+                        <select class="result-setting-rule-select w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="">-- Pilih Aturan --</option>
+                            ${resultRuleOptions}
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Image Display Area -->
+                <div class="result-setting-image-area mb-4 hidden">
+                    <div class="relative inline-block">
+                        <img src="" alt="Result image" class="max-w-full h-auto rounded-lg border border-gray-200 result-setting-image" style="max-height: 300px;">
+                        <button class="remove-result-setting-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Hidden File Input -->
+                <input type="file" accept="image/*" class="hidden result-setting-image-file-input">
+                <input type="hidden" class="result-setting-image-value">
+                
+                <!-- Image Settings -->
+                <div class="result-setting-image-settings hidden mt-4 space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Posisi gambar</label>
+                        <select class="result-setting-image-alignment-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Text Display Area -->
+                <div class="mt-4">
+                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Teks Hasil</label>
+                    <textarea 
+                        rows="4"
+                        class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
+                        placeholder="Teks hasil akan diambil dari aturan yang dipilih"
+                    ></textarea>
+                </div>
+                
+                <!-- Text Alignment -->
+                <div class="mt-4">
+                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Posisi teks</label>
+                    <select class="result-setting-text-alignment-select text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                        <option value="left">Kiri</option>
+                        <option value="center" selected>Tengah</option>
+                        <option value="right">Kanan</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="flex flex-col items-end space-y-2 ml-4">
+                <button class="add-result-setting-image-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Tambahkan gambar">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                </button>
+                <button class="delete-result-setting-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus setup hasil">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `;
+    return card;
+}
+
+// Function to attach events to result setting card
+function attachResultSettingEvents(card) {
+    const ruleSelect = card.querySelector('.result-setting-rule-select');
+    const addImageBtn = card.querySelector('.add-result-setting-image-btn');
+    const imageFileInput = card.querySelector('.result-setting-image-file-input');
+    const imageArea = card.querySelector('.result-setting-image-area');
+    const resultImage = card.querySelector('.result-setting-image');
+    const removeImageBtn = card.querySelector('.remove-result-setting-image-btn');
+    const imageValueInput = card.querySelector('.result-setting-image-value');
+    const imageSettings = card.querySelector('.result-setting-image-settings');
+    const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
+    const textArea = card.querySelector('.result-setting-text');
+    const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
+    const deleteBtn = card.querySelector('.delete-result-setting-btn');
+    
+    // Update text from selected rule
+    if (ruleSelect) {
+        ruleSelect.addEventListener('change', function() {
+            const selectedIndex = parseInt(this.value);
+            if (!isNaN(selectedIndex)) {
+                const resultRulesContainer = document.getElementById('result-rules-container');
+                if (resultRulesContainer) {
+                    const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
+                    const selectedRule = ruleCards[selectedIndex];
+                    if (selectedRule && textArea) {
+                        const texts = Array.from(selectedRule.querySelectorAll('.rule-result-text'))
+                            .map(ta => ta.value.trim())
+                            .filter(t => t);
+                        textArea.value = texts.join('\n\n');
+                    }
+                }
+            }
+        });
+    }
+    
+    // Image upload
+    if (addImageBtn && imageFileInput) {
+        addImageBtn.addEventListener('click', () => imageFileInput.click());
+        
+        imageFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const base64 = event.target.result;
+                if (imageValueInput) {
+                    imageValueInput.value = base64;
+                }
+                if (resultImage) {
+                    resultImage.src = base64;
+                }
+                if (imageArea) {
+                    imageArea.classList.remove('hidden');
+                }
+                if (imageSettings) {
+                    imageSettings.classList.remove('hidden');
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    // Remove image
+    if (removeImageBtn) {
+        removeImageBtn.addEventListener('click', function() {
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+            if (resultImage) {
+                resultImage.src = '';
+            }
+            if (imageArea) {
+                imageArea.classList.add('hidden');
+            }
+            if (imageSettings) {
+                imageSettings.classList.add('hidden');
+            }
+            if (imageFileInput) {
+                imageFileInput.value = '';
+            }
+        });
+    }
+    
+    // Delete card
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function() {
+            card.remove();
+        });
+    }
 }
 
 // Question templates untuk setiap tipe
@@ -66,9 +1100,9 @@ const questionTemplates = {
         icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`,
         label: 'Pilihan ganda',
         input: `
-            <div class="space-y-2 max-w-md mt-4">
+            <div class="question-options-wrapper space-y-2 max-w-md mt-4" data-option-container="true">
                 <div class="option-item flex items-center space-x-2">
-                    <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
+                    <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 1" 
@@ -81,7 +1115,7 @@ const questionTemplates = {
                     </button>
                 </div>
                 <div class="option-item flex items-center space-x-2">
-                    <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
+                    <input type="radio" class="text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 2" 
@@ -93,7 +1127,7 @@ const questionTemplates = {
                         </svg>
                     </button>
                 </div>
-                <div class="mt-2 space-y-1">
+                <div class="option-controls mt-2 space-y-1">
                     <button class="add-option-btn text-sm text-gray-600 hover:text-red-600 flex items-center space-x-1">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -120,9 +1154,9 @@ const questionTemplates = {
         icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`,
         label: 'Kotak centang',
         input: `
-            <div class="space-y-2 max-w-md mt-4">
+            <div class="question-options-wrapper space-y-2 max-w-md mt-4" data-option-container="true">
                 <div class="option-item flex items-center space-x-2">
-                    <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
+                    <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 1" 
@@ -135,7 +1169,7 @@ const questionTemplates = {
                     </button>
                 </div>
                 <div class="option-item flex items-center space-x-2">
-                    <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
+                    <input type="checkbox" class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
                     <input 
                         type="text" 
                         placeholder="Opsi 2" 
@@ -147,7 +1181,7 @@ const questionTemplates = {
                         </svg>
                     </button>
                 </div>
-                <div class="mt-2 space-y-1">
+                <div class="option-controls mt-2 space-y-1">
                     <button class="add-option-btn text-sm text-gray-600 hover:text-red-600 flex items-center space-x-1">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -166,7 +1200,7 @@ const questionTemplates = {
         icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>`,
         label: 'Dropdown',
         input: `
-            <div class="space-y-2 max-w-md mt-4">
+            <div class="question-options-wrapper space-y-2 max-w-md mt-4" data-option-container="true">
                 <div class="option-item flex items-center space-x-2">
                     <span class="text-sm text-gray-500 w-4">1.</span>
                     <input 
@@ -193,7 +1227,7 @@ const questionTemplates = {
                         </svg>
                     </button>
                 </div>
-                <div class="mt-2 space-y-1">
+                <div class="option-controls mt-2 space-y-1">
                     <button class="add-option-btn text-sm text-gray-600 hover:text-red-600 flex items-center space-x-1">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -221,11 +1255,11 @@ function createQuestionCard(type = 'short-answer') {
     questionCard.setAttribute('data-question-type', type);
     questionCard.innerHTML = `
         <!-- Drag Handle -->
-        <div class="absolute top-2 left-1/2 transform -translate-x-1/2 cursor-move opacity-0 group-hover:opacity-100 transition-opacity">
-            <svg class="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
+        <button type="button" class="drag-handle absolute top-2 left-1/2 -translate-x-1/2 p-1.5 text-gray-400 hover:text-red-600 rounded-full bg-white/80 shadow opacity-0 group-hover:opacity-100 transition-all cursor-grab focus:outline-none" data-drag-handle>
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M3 12h18M3 6h18M3 18h18"></path>
             </svg>
-        </div>
+        </button>
 
         <div class="flex items-start space-x-4">
             <div class="flex-1 min-w-0">
@@ -265,6 +1299,24 @@ function createQuestionCard(type = 'short-answer') {
 
                 <!-- Hidden File Input -->
                 <input type="file" accept="image/*" class="hidden image-file-input" data-question-id="${questionCounter}">
+                <input type="hidden" class="question-image-value">
+                <div class="question-image-settings hidden mt-4 space-y-3 border-t border-gray-100 pt-4">
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Posisi gambar</label>
+                        <select class="image-alignment-select mt-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Lebar gambar</label>
+                        <div class="flex items-center space-x-3 mt-1">
+                            <input type="range" min="30" max="100" step="5" value="100" class="image-width-range flex-1 accent-red-600">
+                            <span class="image-width-display text-xs text-gray-500 w-12 text-right">100%</span>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Question Input Area -->
                 <div class="question-input-area">
@@ -272,32 +1324,72 @@ function createQuestionCard(type = 'short-answer') {
                 </div>
 
                 <!-- Bottom Actions -->
-                <div class="mt-4 flex items-center justify-between pt-4 border-t border-gray-200">
-                    <div class="flex items-center space-x-2">
-                        <button class="duplicate-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Duplikat">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                            </svg>
-                        </button>
-                        <button class="delete-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                            </svg>
-                        </button>
+                <div class="mt-4 space-y-4 pt-4 border-t border-gray-200">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <button class="duplicate-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Duplikat">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                </svg>
+                            </button>
+                            <button class="delete-question-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Hapus">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer">
+                                <input type="checkbox" class="required-checkbox sr-only">
+                                <div class="toggle-switch relative w-11 h-6 bg-gray-300 rounded-full transition-colors duration-200 ease-in-out">
+                                    <div class="toggle-switch-handle absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform duration-200 ease-in-out shadow-sm"></div>
+                                </div>
+                                <span class="select-none">Wajib diisi</span>
+                            </label>
+                            <button class="more-options-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Setelan pertanyaan">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-4">
-                        <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer">
-                            <input type="checkbox" class="required-checkbox sr-only">
-                            <div class="toggle-switch relative w-11 h-6 bg-gray-300 rounded-full transition-colors duration-200 ease-in-out">
-                                <div class="toggle-switch-handle absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform duration-200 ease-in-out shadow-sm"></div>
+
+                    <div class="question-advanced-settings hidden bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-4">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Validasi Jawaban</p>
+                                <p class="text-xs text-gray-500 mt-1">Gunakan regex sederhana untuk memvalidasi jawaban.</p>
                             </div>
-                            <span class="select-none">Wajib diisi</span>
-                        </label>
-                        <button class="more-options-btn p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors" title="Opsi lainnya">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path>
-                            </svg>
-                        </button>
+                            <input type="text" class="question-validation-input mt-2 sm:mt-0 sm:max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="contoh: ^[0-9]+$">
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Pesan Validasi</p>
+                                <p class="text-xs text-gray-500 mt-1">Tampilkan pesan kustom saat jawaban tidak valid.</p>
+                            </div>
+                            <input type="text" class="question-validation-message mt-2 sm:mt-0 sm:max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Silakan masukkan angka saja">
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Deskripsi Tambahan</p>
+                                <p class="text-xs text-gray-500 mt-1">Sampaikan petunjuk tambahan untuk pertanyaan ini.</p>
+                            </div>
+                            <textarea rows="2" class="question-extra-notes mt-2 sm:mt-0 sm:max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Contoh: Gunakan format tanggal dd/mm/yyyy"></textarea>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm font-medium text-gray-900">Batas Karakter (opsional)</p>
+                                <p class="text-xs text-gray-500 mt-1">Tentukan batas minimal & maksimal untuk jawaban teks.</p>
+                            </div>
+                            <div class="flex items-center space-x-2 mt-2 sm:mt-0">
+                                <input type="number" min="0" class="question-min-length w-24 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Min">
+                                <span class="text-sm text-gray-500">s.d</span>
+                                <input type="number" min="0" class="question-max-length w-24 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Maks">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -327,6 +1419,28 @@ function createQuestionCard(type = 'short-answer') {
                             `).join('')}
                         </div>
                     </div>
+                </div>
+                
+                <!-- Quick Add Buttons (shown when card is active) -->
+                <div class="question-quick-add-buttons hidden flex-col items-end space-y-2 mt-2">
+                    <button class="quick-add-question-btn flex items-center space-x-1 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors" title="Tambah pertanyaan">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        <span>Tambah pertanyaan</span>
+                    </button>
+                    <button class="quick-add-section-btn flex items-center space-x-1 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors" title="Tambahkan bagian">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <span>Tambahkan bagian</span>
+                    </button>
+                    <button class="quick-add-result-setting-btn hidden items-center space-x-1 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors" title="Setup Hasil">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span>Setup Hasil</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -363,7 +1477,9 @@ function initTabs() {
             const targetContent = document.getElementById(`tab-${targetTab}`);
             if (targetContent) {
                 targetContent.classList.remove('hidden');
-                
+                if (targetTab === 'responses') {
+                    triggerResponsesFetch();
+                }
             }
         });
     });
@@ -416,11 +1532,14 @@ let answerTemplateCounter = 0;
 let resultRuleCounter = 0;
 
 // Fungsi untuk membuat answer template card
-function createAnswerTemplateCard() {
+function createAnswerTemplateCard(dbId = null) {
     answerTemplateCounter++;
     const templateCard = document.createElement('div');
     templateCard.className = 'answer-template-card bg-gray-50 rounded-lg border border-gray-200 p-4';
     templateCard.setAttribute('data-template-id', answerTemplateCounter);
+    if (dbId) {
+        templateCard.setAttribute('data-db-id', dbId);
+    }
     templateCard.innerHTML = `
         <div class="flex items-center space-x-3">
             <div class="flex-1">
@@ -443,12 +1562,60 @@ function createAnswerTemplateCard() {
     return templateCard;
 }
 
+function appendAnswerTemplateCard(container) {
+    const templateCard = createAnswerTemplateCard();
+    container.appendChild(templateCard);
+
+    const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', async function() {
+            const dbId = templateCard.getAttribute('data-db-id');
+            const formId = getMetaContent('form-id');
+            
+            // If form is saved and template has database ID, delete from database
+            if (formId && dbId) {
+                try {
+                    const response = await fetch(`/forms/${formId}/answer-templates/${dbId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal menghapus template.');
+                    }
+                } catch (error) {
+                    console.error('Error deleting template:', error);
+                    alert('Gagal menghapus template dari database: ' + error.message);
+                    return; // Don't remove from DOM if database delete failed
+                }
+            }
+            
+            // Remove from DOM
+            templateCard.remove();
+            if (container.children.length === 0) {
+                container.innerHTML = getAnswerTemplatesPlaceholder();
+            }
+            updateRuleSaveControlsVisibility();
+        });
+    }
+
+    return templateCard;
+}
+
 // Fungsi untuk membuat result rule card
-function createResultRuleCard() {
+function createResultRuleCard(dbId = null) {
     resultRuleCounter++;
     const ruleCard = document.createElement('div');
     ruleCard.className = 'result-rule-card bg-gray-50 rounded-lg border border-gray-200 p-4';
     ruleCard.setAttribute('data-rule-id', resultRuleCounter);
+    if (dbId) {
+        ruleCard.setAttribute('data-db-id', dbId);
+    }
     ruleCard.innerHTML = `
         <div class="flex items-start justify-between mb-3">
             <h5 class="text-sm font-medium text-gray-900">Aturan ${resultRuleCounter}</h5>
@@ -498,6 +1665,13 @@ function createResultRuleCard() {
             </div>
         </div>
     `;
+
+    return ruleCard;
+}
+
+function appendResultRuleCard(container) {
+    const ruleCard = createResultRuleCard(null);
+    container.appendChild(ruleCard);
 
     const conditionSelect = ruleCard.querySelector('.rule-condition-type');
     const rangeInputs = ruleCard.querySelector('.rule-range-inputs');
@@ -565,17 +1739,181 @@ function createResultRuleCard() {
             if (textItem) {
                 textItem.remove();
                 const remaining = ruleCard.querySelectorAll('.rule-result-text');
-                if (!remaining.length) {
+                if (!remaining.length && addResultTextBtn) {
                     addResultTextBtn.click();
                 }
             }
         });
     });
 
+    const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
+    if (deleteRuleBtn) {
+        deleteRuleBtn.addEventListener('click', async function () {
+            const dbId = ruleCard.getAttribute('data-db-id');
+            const formId = getMetaContent('form-id');
+            
+            // If form is saved and rule has database ID, delete from database
+            if (formId && dbId) {
+                try {
+                    const response = await fetch(`/forms/${formId}/result-rules/${dbId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal menghapus aturan.');
+                    }
+                } catch (error) {
+                    console.error('Error deleting rule:', error);
+                    alert('Gagal menghapus aturan dari database: ' + error.message);
+                    return; // Don't remove from DOM if database delete failed
+                }
+            }
+            
+            // Remove from DOM
+            ruleCard.remove();
+            if (container.children.length === 0) {
+                container.innerHTML = getResultRulesPlaceholder();
+            }
+            renderSavedRulesChips();
+            updateUseRuleButtonsVisibility();
+        });
+    }
+
     return ruleCard;
 }
 
+// Function to attach events to result rule card (used when loading from database)
+function attachResultRuleEvents(ruleCard, container) {
+    const conditionSelect = ruleCard.querySelector('.rule-condition-type');
+    const rangeInputs = ruleCard.querySelector('.rule-range-inputs');
+    const singleInput = ruleCard.querySelector('.rule-single-inputs');
+
+    if (conditionSelect && !conditionSelect.hasAttribute('data-listener')) {
+        conditionSelect.setAttribute('data-listener', 'true');
+        conditionSelect.addEventListener('change', function () {
+            const conditionType = this.value;
+            const singleScoreInput = singleInput.querySelector('.rule-single-score');
+
+            if (conditionType === 'range') {
+                rangeInputs.classList.remove('hidden');
+                singleInput.classList.add('hidden');
+            } else {
+                rangeInputs.classList.add('hidden');
+                singleInput.classList.remove('hidden');
+
+                if (singleScoreInput) {
+                    if (conditionType === 'equal') {
+                        singleScoreInput.placeholder = 'Nilai (sama dengan)';
+                    } else if (conditionType === 'greater') {
+                        singleScoreInput.placeholder = 'Nilai (lebih dari)';
+                    } else if (conditionType === 'less') {
+                        singleScoreInput.placeholder = 'Nilai (kurang dari)';
+                    }
+                }
+            }
+        });
+    }
+
+    const addResultTextBtn = ruleCard.querySelector('.add-result-text-btn');
+    const resultTextsContainer = ruleCard.querySelector('.rule-result-texts');
+
+    if (addResultTextBtn && resultTextsContainer) {
+        if (!addResultTextBtn.hasAttribute('data-listener')) {
+            addResultTextBtn.setAttribute('data-listener', 'true');
+            addResultTextBtn.addEventListener('click', function () {
+                const textItem = document.createElement('div');
+                textItem.className = 'flex items-start space-x-2';
+                textItem.innerHTML = `
+                    <textarea placeholder="Masukkan teks hasil yang akan ditampilkan" rows="2" class="rule-result-text flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-red-600 focus:ring-1 focus:ring-red-600 outline-none resize-none"></textarea>
+                    <button class="delete-result-text-btn p-2 text-gray-400 hover:text-red-600 transition-colors shrink-0" title="Hapus teks">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                `;
+                resultTextsContainer.appendChild(textItem);
+
+                const deleteBtn = textItem.querySelector('.delete-result-text-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', function () {
+                        textItem.remove();
+                        const remaining = resultTextsContainer.querySelectorAll('.rule-result-text');
+                        if (!remaining.length) {
+                            addResultTextBtn.click();
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    const deleteTextBtns = ruleCard.querySelectorAll('.delete-result-text-btn');
+    deleteTextBtns.forEach(btn => {
+        if (!btn.hasAttribute('data-listener')) {
+            btn.setAttribute('data-listener', 'true');
+            btn.addEventListener('click', function () {
+                const textItem = this.closest('.flex.items-start.space-x-2');
+                if (textItem) {
+                    textItem.remove();
+                    const remaining = ruleCard.querySelectorAll('.rule-result-text');
+                    if (!remaining.length && addResultTextBtn) {
+                        addResultTextBtn.click();
+                    }
+                }
+            });
+        }
+    });
+
+    const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
+    if (deleteRuleBtn && !deleteRuleBtn.hasAttribute('data-listener')) {
+        deleteRuleBtn.setAttribute('data-listener', 'true');
+        deleteRuleBtn.addEventListener('click', async function () {
+            const dbId = ruleCard.getAttribute('data-db-id');
+            const formId = getMetaContent('form-id');
+            
+            // If form is saved and rule has database ID, delete from database
+            if (formId && dbId) {
+                try {
+                    const response = await fetch(`/forms/${formId}/result-rules/${dbId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal menghapus aturan.');
+                    }
+                } catch (error) {
+                    console.error('Error deleting rule:', error);
+                    alert('Gagal menghapus aturan dari database: ' + error.message);
+                    return; // Don't remove from DOM if database delete failed
+                }
+            }
+            
+            // Remove from DOM
+            ruleCard.remove();
+            if (container.children.length === 0) {
+                container.innerHTML = getResultRulesPlaceholder();
+            }
+            renderSavedRulesChips();
+            updateUseRuleButtonsVisibility();
+        });
+    }
+}
+
 let savedRulesState = [];
+let sortableInstance = null;
+let sortableInitialized = false;
 
 function hasFormTemplates() {
     return document.querySelectorAll('.answer-template-card').length > 0;
@@ -656,6 +1994,9 @@ function renderSavedRulesChips() {
         const chip = document.createElement('div');
         chip.className = 'saved-rule-chip inline-flex items-center space-x-2 px-3 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full';
         chip.setAttribute('data-rule-index', index);
+        if (rule.id) {
+            chip.setAttribute('data-preset-id', rule.id);
+        }
 
         const descriptionParts = [];
         if (templates.length) {
@@ -674,6 +2015,11 @@ function renderSavedRulesChips() {
 
         chip.innerHTML = `
             <span class="truncate max-w-[200px]">${descriptionParts.join(' • ')}</span>
+            <button type="button" class="edit-saved-rule-btn text-red-500 hover:text-red-700">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m-1-1v2m-6 6l4 4 9-9-4-4-9 9z"></path>
+                </svg>
+            </button>
             <button type="button" class="remove-saved-rule-btn text-red-500 hover:text-red-700">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -683,9 +2029,50 @@ function renderSavedRulesChips() {
 
         chipsWrapper.appendChild(chip);
 
+        const editBtn = chip.querySelector('.edit-saved-rule-btn');
+        if (editBtn) {
+            editBtn.addEventListener('click', function () {
+                hydrateRuleBuilderFromPreset(rule);
+            });
+        }
+
         const removeBtn = chip.querySelector('.remove-saved-rule-btn');
         if (removeBtn) {
-            removeBtn.addEventListener('click', function () {
+            removeBtn.addEventListener('click', async function () {
+                const presetId = chip.getAttribute('data-preset-id');
+                
+                // If preset has database ID, delete from database
+                if (presetId) {
+                    try {
+                        const response = await fetch(`/form-rule-presets/${presetId}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'Accept': 'application/json',
+                            },
+                        });
+                        
+                        const data = await response.json();
+                        if (!response.ok || !data.success) {
+                            throw new Error(data.message || 'Gagal menghapus aturan dari database.');
+                        }
+                        
+                        // Update saved rules state from server response
+                        if (data.presets) {
+                            saveRulesToState(data.presets);
+                            renderSavedRulesChips();
+                            updateUseRuleButtonsVisibility();
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('Error deleting preset:', error);
+                        alert('Gagal menghapus aturan dari database: ' + error.message);
+                        return; // Don't remove from DOM if database delete failed
+                    }
+                }
+                
+                // Fallback: Remove from local state if no database ID
                 const index = parseInt(chip.getAttribute('data-rule-index'), 10);
                 const current = loadSavedRules();
                 current.splice(index, 1);
@@ -784,6 +2171,350 @@ function gatherRulesFromSettings() {
     });
 }
 
+function setupBuilderResponses(options) {
+    const {
+        responsesUrl = '',
+        totalResponses = 0,
+    } = options || {};
+
+    const summaryEmpty = document.getElementById('builder-summary-empty');
+    const summaryLoading = document.getElementById('builder-summary-loading');
+    const summaryContent = document.getElementById('builder-summary-content');
+    const individualEmpty = document.getElementById('builder-individual-empty');
+    const individualLoading = document.getElementById('builder-individual-loading');
+    const individualContent = document.getElementById('builder-individual-content');
+    const responsesError = document.getElementById('builder-responses-error');
+    const totalResponsesEl = document.getElementById('builder-total-responses');
+    const latestResponseEl = document.getElementById('builder-latest-response');
+    const questionCountEl = document.getElementById('builder-question-count');
+    const positionEl = document.getElementById('builder-response-position');
+    const emailEl = document.getElementById('builder-response-email');
+    const dateEl = document.getElementById('builder-response-date');
+    const scoreEl = document.getElementById('builder-response-score');
+    const answersContainer = document.getElementById('builder-response-answers');
+    const prevBtn = document.getElementById('builder-prev-response');
+    const nextBtn = document.getElementById('builder-next-response');
+
+    if (!responsesUrl || totalResponses === 0) {
+        requestBuilderResponsesData = null;
+        return;
+    }
+
+    let responsesLoaded = false;
+    let responsesLoading = false;
+    let summaryData = [];
+    let individualData = [];
+    let currentResponseIndex = 0;
+
+    function setLoadingState(isLoading) {
+        if (isLoading) {
+            summaryLoading?.classList.remove('hidden');
+            individualLoading?.classList.remove('hidden');
+            summaryContent?.classList.add('hidden');
+            individualContent?.classList.add('hidden');
+            responsesError?.classList.add('hidden');
+        } else {
+            summaryLoading?.classList.add('hidden');
+            individualLoading?.classList.add('hidden');
+        }
+    }
+
+    function showError(message) {
+        if (responsesError) {
+            responsesError.textContent = message;
+            responsesError.classList.remove('hidden');
+        }
+    }
+
+    function hideError() {
+        responsesError?.classList.add('hidden');
+    }
+
+    function updateOverviewFromData(data) {
+        if (typeof data.totalResponses === 'number' && totalResponsesEl) {
+            totalResponsesEl.textContent = data.totalResponses;
+        }
+        if (Array.isArray(data.questionSummaries) && questionCountEl) {
+            questionCountEl.textContent = data.questionSummaries.length;
+        }
+        if (latestResponseEl) {
+            const latest = data.latestResponseAt
+                || (Array.isArray(data.individualResponses) && data.individualResponses[0]
+                    ? data.individualResponses[0].submitted_at
+                    : null);
+            latestResponseEl.textContent = latest || latestResponseEl.textContent || 'Belum ada data';
+        }
+    }
+
+    function renderSummaryCards(items) {
+        if (!summaryContent) {
+            return;
+        }
+
+        summaryContent.innerHTML = '';
+
+        if (!items.length) {
+            summaryContent.classList.add('hidden');
+            summaryEmpty?.classList.remove('hidden');
+            return;
+        }
+
+        summaryEmpty?.classList.add('hidden');
+        summaryContent.classList.remove('hidden');
+
+        const chartItems = [];
+        const colors = ['#F87171', '#FBBF24', '#34D399', '#60A5FA', '#A78BFA', '#F472B6', '#F97316', '#2DD4BF'];
+
+        items.forEach((item, index) => {
+            const card = document.createElement('div');
+            card.className = 'border border-gray-100 rounded-xl p-5 shadow-sm';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-start justify-between mb-4';
+
+            const headerLeft = document.createElement('div');
+            const label = document.createElement('p');
+            label.className = 'text-xs text-gray-500 uppercase tracking-wide';
+            label.textContent = `Pertanyaan ${index + 1}`;
+            const title = document.createElement('h3');
+            title.className = 'text-lg font-semibold text-gray-900';
+            title.textContent = item.title || 'Pertanyaan';
+            headerLeft.appendChild(label);
+            headerLeft.appendChild(title);
+
+            const totalPill = document.createElement('span');
+            totalPill.className = 'text-xs font-medium text-gray-600 bg-gray-100 px-3 py-1 rounded-full';
+            totalPill.textContent = `${item.total ?? 0} jawaban`;
+
+            header.appendChild(headerLeft);
+            header.appendChild(totalPill);
+            card.appendChild(header);
+
+            if (item.chart) {
+                const chartWrapper = document.createElement('div');
+                chartWrapper.className = 'h-64';
+                const canvas = document.createElement('canvas');
+                canvas.id = `builder-chart-${item.id}`;
+                chartWrapper.appendChild(canvas);
+                card.appendChild(chartWrapper);
+                chartItems.push({ item, canvasId: canvas.id, colors });
+            } else {
+                const answersWrapper = document.createElement('div');
+                answersWrapper.className = 'space-y-3';
+                if (Array.isArray(item.text_answers) && item.text_answers.length) {
+                    item.text_answers.forEach((answerText) => {
+                        const answerEl = document.createElement('p');
+                        answerEl.className = 'p-3 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-700';
+                        answerEl.textContent = answerText;
+                        answersWrapper.appendChild(answerEl);
+                    });
+                } else {
+                    const emptyEl = document.createElement('p');
+                    emptyEl.className = 'text-sm text-gray-500';
+                    emptyEl.textContent = 'Belum ada jawaban untuk pertanyaan ini.';
+                    answersWrapper.appendChild(emptyEl);
+                }
+                card.appendChild(answersWrapper);
+            }
+
+            summaryContent.appendChild(card);
+        });
+
+        if (chartItems.length) {
+            ensureChartJsLoaded()
+                .then(() => {
+                    chartItems.forEach(({ item, canvasId, colors: baseColors }) => {
+                        const canvas = document.getElementById(canvasId);
+                        if (!canvas || !window.Chart || !item.chart) {
+                            return;
+                        }
+                        const datasetColors = item.chart.values.map((_, idx) => baseColors[idx % baseColors.length]);
+                        new Chart(canvas, {
+                            type: item.chart.type,
+                            data: {
+                                labels: item.chart.labels,
+                                datasets: [{
+                                    label: 'Jumlah Jawaban',
+                                    data: item.chart.values,
+                                    backgroundColor: datasetColors,
+                                    borderColor: '#ffffff',
+                                    borderWidth: 1,
+                                }],
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        position: 'bottom',
+                                    },
+                                },
+                                scales: item.chart.type === 'bar'
+                                    ? {
+                                        y: {
+                                            beginAtZero: true,
+                                            ticks: { stepSize: 1 },
+                                        },
+                                    }
+                                    : {},
+                            },
+                        });
+                    });
+                })
+                .catch((error) => {
+                    console.error(error);
+                    showError('Grafik tidak dapat ditampilkan.');
+                });
+        }
+    }
+
+    function renderIndividualResponse(index) {
+        if (!answersContainer) {
+            return;
+        }
+        const data = individualData[index];
+        if (!data) {
+            return;
+        }
+
+        if (positionEl) {
+            positionEl.textContent = index + 1;
+        }
+        if (emailEl) {
+            emailEl.textContent = data.email || 'Anonim';
+        }
+        if (dateEl) {
+            dateEl.textContent = data.submitted_at || '-';
+        }
+        if (scoreEl) {
+            scoreEl.textContent = data.total_score ?? '-';
+        }
+
+        answersContainer.innerHTML = '';
+        if (!Array.isArray(data.answers) || !data.answers.length) {
+            const empty = document.createElement('p');
+            empty.className = 'text-sm text-gray-500';
+            empty.textContent = 'Tidak ada jawaban yang tersedia.';
+            answersContainer.appendChild(empty);
+        } else {
+            data.answers.forEach((answer) => {
+                const block = document.createElement('div');
+                block.className = 'p-4 border border-gray-100 rounded-lg';
+
+                const title = document.createElement('p');
+                title.className = 'text-sm font-medium text-gray-900';
+                title.textContent = answer.question || 'Pertanyaan';
+
+                const value = document.createElement('p');
+                value.className = 'mt-1 text-sm text-gray-700';
+                value.textContent = answer.value || '-';
+
+                block.appendChild(title);
+                block.appendChild(value);
+                answersContainer.appendChild(block);
+            });
+        }
+
+        if (prevBtn) {
+            prevBtn.disabled = index === 0;
+        }
+        if (nextBtn) {
+            nextBtn.disabled = index === individualData.length - 1;
+        }
+    }
+
+    function initializeIndividualSection() {
+        if (!individualContent) {
+            return;
+        }
+
+        if (!individualData.length) {
+            individualContent.classList.add('hidden');
+            individualEmpty?.classList.remove('hidden');
+            return;
+        }
+
+        individualEmpty?.classList.add('hidden');
+        individualContent.classList.remove('hidden');
+        currentResponseIndex = 0;
+        renderIndividualResponse(currentResponseIndex);
+    }
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (currentResponseIndex > 0) {
+                currentResponseIndex -= 1;
+                renderIndividualResponse(currentResponseIndex);
+            }
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            if (currentResponseIndex < individualData.length - 1) {
+                currentResponseIndex += 1;
+                renderIndividualResponse(currentResponseIndex);
+            }
+        });
+    }
+
+    requestBuilderResponsesData = async function () {
+        if (responsesLoaded || responsesLoading) {
+            return;
+        }
+
+        responsesLoading = true;
+        hideError();
+        setLoadingState(true);
+
+        try {
+            const response = await fetch(responsesUrl, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error('Gagal memuat data jawaban.');
+            }
+
+            const payload = await response.json();
+            if (!payload.success || !payload.data) {
+                throw new Error(payload.message || 'Gagal memuat data jawaban.');
+            }
+
+            const data = payload.data;
+            summaryData = Array.isArray(data.questionSummaries) ? data.questionSummaries : [];
+            individualData = Array.isArray(data.individualResponses) ? data.individualResponses : [];
+
+            updateOverviewFromData(data);
+
+            if (summaryData.length) {
+                renderSummaryCards(summaryData);
+            } else {
+                summaryContent?.classList.add('hidden');
+                summaryEmpty?.classList.remove('hidden');
+            }
+
+            if (individualData.length) {
+                initializeIndividualSection();
+            } else {
+                individualContent?.classList.add('hidden');
+                individualEmpty?.classList.remove('hidden');
+            }
+
+            responsesLoaded = true;
+        } catch (error) {
+            console.error(error);
+            showError(error.message || 'Tidak dapat memuat data jawaban.');
+        } finally {
+            responsesLoading = false;
+            setLoadingState(false);
+        }
+    };
+}
+
 function applySavedRuleToQuestion(questionCard, savedRule) {
     if (!questionCard || !savedRule) {
         return;
@@ -794,27 +2525,11 @@ function applySavedRuleToQuestion(questionCard, savedRule) {
     const templates = Array.isArray(rule.templates) ? rule.templates : [];
 
     if (questionCard.getAttribute('data-question-type') === 'multiple-choice' && templates.length) {
-        const addOptionBtn = questionCard.querySelector('.add-option-btn');
-        const container = questionCard.querySelector('.question-input-area > div');
-        if (container && addOptionBtn) {
-            let optionItems = Array.from(container.querySelectorAll('.option-item'));
-            while (optionItems.length < templates.length) {
-                addOptionBtn.click();
-                optionItems = Array.from(container.querySelectorAll('.option-item'));
-            }
-
-            optionItems.forEach((item, idx) => {
-                const input = item.querySelector('.option-input');
-                if (!input) {
-                    return;
-                }
-                if (idx < templates.length) {
-                    input.value = templates[idx].answer_text || templates[idx].text || '';
-                } else {
-                    item.remove();
-                }
-            });
-        }
+        const normalizedOptions = templates.map(template => ({
+            text: template.answer_text || template.text || '',
+        }));
+        setQuestionOptions(questionCard, 'multiple-choice', normalizedOptions);
+        attachOptionEvents(questionCard);
     }
 
     let ruleBadgesContainer = questionCard.querySelector('.saved-rule-badges');
@@ -981,6 +2696,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const rootElement = document.getElementById('form-builder-root');
     let initialData = null;
     let formMode = 'create';
+    let formId = getMetaContent('form-id');
+    let saveFormUrl = getMetaContent('save-form-url') || '/forms';
+    let saveFormMethod = (getMetaContent('save-form-method') || 'POST').toUpperCase();
+    const shareLinkBtn = document.getElementById('share-link-btn');
+    let shareLinkUrl = rootElement?.getAttribute('data-share-url') || '';
+    const rulePresetUrl = getMetaContent('rule-preset-url') || '';
+    const responsesDataUrl = rootElement?.getAttribute('data-responses-url') || '';
+    const totalResponsesHint = Number(rootElement?.getAttribute('data-total-responses') || '0');
 
     if (rootElement) {
         const initialAttr = rootElement.getAttribute('data-initial');
@@ -993,6 +2716,40 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         formMode = rootElement.getAttribute('data-mode') || 'create';
+
+        const savedRulesAttr = rootElement.getAttribute('data-saved-rules');
+        if (savedRulesAttr) {
+            try {
+                const parsedSavedRules = JSON.parse(savedRulesAttr) || [];
+                saveRulesToState(parsedSavedRules);
+            } catch (error) {
+                console.error('Failed to parse saved rules data:', error);
+            }
+        }
+    }
+
+    const updateShareButtonVisibility = () => {
+        if (!shareLinkBtn) {
+            return;
+        }
+
+        if (shareLinkUrl) {
+            shareLinkBtn.classList.remove('hidden');
+            shareLinkBtn.disabled = false;
+        } else {
+            shareLinkBtn.classList.add('hidden');
+            shareLinkBtn.disabled = true;
+        }
+    };
+
+    updateShareButtonVisibility();
+
+    if (shareLinkBtn) {
+        shareLinkBtn.addEventListener('click', function() {
+            if (shareLinkUrl) {
+                openShareModal(shareLinkUrl);
+            }
+        });
     }
 
     const themeColorButtons = document.querySelectorAll('[data-theme-color]');
@@ -1017,9 +2774,14 @@ document.addEventListener('DOMContentLoaded', function() {
         populateFormBuilder(initialData);
     } else {
         updateThemeColorSelection('red');
+        updateMainButtonsVisibility();
     }
     
     updateRuleSaveControlsVisibility();
+    setupBuilderResponses({
+        responsesUrl: responsesDataUrl,
+        totalResponses: totalResponsesHint,
+    });
     
     // Initialize answer templates
     const addAnswerTemplateBtn = document.getElementById('add-answer-template-btn');
@@ -1027,40 +2789,64 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (addAnswerTemplateBtn && answerTemplatesContainer) {
         addAnswerTemplateBtn.addEventListener('click', function() {
-            if (answerTemplatesContainer.querySelector('.text-gray-500')) {
+            if (answerTemplatesContainer.querySelector('.answer-templates-placeholder')) {
                 answerTemplatesContainer.innerHTML = '';
             }
-            const templateCard = createAnswerTemplateCard();
-            answerTemplatesContainer.appendChild(templateCard);
+            appendAnswerTemplateCard(answerTemplatesContainer);
             updateRuleSaveControlsVisibility();
-            
-            const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', function() {
-                    templateCard.remove();
-                    if (answerTemplatesContainer.children.length === 0) {
-                        answerTemplatesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
-                    }
-                    updateRuleSaveControlsVisibility();
-                });
-            }
         });
     }
     
     const saveRulesBtn = document.getElementById('save-form-rules-btn');
     if (saveRulesBtn) {
-        saveRulesBtn.addEventListener('click', function() {
+        saveRulesBtn.addEventListener('click', async function() {
             const bundle = gatherRulesFromSettings();
             if (!bundle) {
                 alert('Tambahkan terlebih dahulu Template Jawaban & Skor untuk menyimpan aturan.');
                 return;
             }
-            const existing = loadSavedRules();
-            existing.push(bundle);
-            saveRulesToState(existing);
-            renderSavedRulesChips();
-            updateUseRuleButtonsVisibility();
-            alert('Aturan berhasil disimpan.');
+
+            if (!rulePresetUrl) {
+                alert('Endpoint penyimpanan aturan tidak tersedia.');
+                return;
+            }
+
+            saveRulesBtn.disabled = true;
+            saveRulesBtn.textContent = 'Menyimpan...';
+
+            try {
+                const response = await fetch(rulePresetUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        templates: bundle.templates ?? [],
+                        result_rules: bundle.result_rules ?? [],
+                    }),
+                });
+
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || 'Gagal menyimpan aturan.');
+                }
+
+                saveRulesToState(data.presets || []);
+                renderSavedRulesChips();
+                updateUseRuleButtonsVisibility();
+                resetFormRulesBuilder();
+                alert(data.message || 'Aturan berhasil disimpan.');
+            } catch (error) {
+                console.error(error);
+                alert(error.message || 'Terjadi kesalahan saat menyimpan aturan.');
+            } finally {
+                saveRulesBtn.disabled = false;
+                saveRulesBtn.textContent = 'Simpan Aturan';
+            }
         });
     }
 
@@ -1073,23 +2859,10 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (addResultRuleBtn && resultRulesContainer) {
         addResultRuleBtn.addEventListener('click', function() {
-            if (resultRulesContainer.querySelector('.text-gray-500')) {
+            if (resultRulesContainer.querySelector('.result-rules-placeholder')) {
                 resultRulesContainer.innerHTML = '';
             }
-            const ruleCard = createResultRuleCard();
-            resultRulesContainer.appendChild(ruleCard);
-            
-            const deleteBtn = ruleCard.querySelector('.delete-result-rule-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', function() {
-                    ruleCard.remove();
-                    if (resultRulesContainer.children.length === 0) {
-                        resultRulesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
-                    }
-                    renderSavedRulesChips();
-                    updateUseRuleButtonsVisibility();
-                });
-            }
+            appendResultRuleCard(resultRulesContainer);
         });
     }
     
@@ -1106,6 +2879,8 @@ document.addEventListener('DOMContentLoaded', function() {
             questionsContainer.appendChild(questionCard);
             updateQuestionNumbers();
             attachQuestionCardEvents(questionCard);
+            initSortable();
+            updateMainButtonsVisibility();
             
             // Focus ke input pertanyaan
             setTimeout(() => {
@@ -1123,6 +2898,7 @@ document.addEventListener('DOMContentLoaded', function() {
         addSectionBtn.addEventListener('click', function() {
             const sectionDivider = createSectionDivider();
             questionsContainer.appendChild(sectionDivider);
+            attachSectionEvents(sectionDivider);
             
             // Attach delete event
             const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
@@ -1130,10 +2906,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 deleteBtn.addEventListener('click', function() {
                     sectionDivider.remove();
                     updateSectionNumbers();
+                    updateMainButtonsVisibility();
                 });
             }
+            
+            initSortable();
+            updateMainButtonsVisibility();
         });
     }
+    
+    // Initial check for main buttons visibility
+    updateMainButtonsVisibility();
     
     // Tutup menu saat klik di luar (untuk modal yang mungkin masih digunakan di tempat lain)
     if (questionTypesMenu) {
@@ -1155,6 +2938,7 @@ document.addEventListener('DOMContentLoaded', function() {
             questionTypesMenu.classList.remove('flex', 'items-center', 'justify-center');
             updateQuestionNumbers();
             attachQuestionCardEvents(questionCard);
+            initSortable();
             
         });
     });
@@ -1180,16 +2964,13 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             
             const formData = collectFormData();
-            const saveUrl = document.querySelector('meta[name="save-form-url"]')?.getAttribute('content') || '/forms';
-            const saveMethod = (document.querySelector('meta[name="save-form-method"]')?.getAttribute('content') || 'POST').toUpperCase();
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-            const dashboardUrl = document.querySelector('meta[name="dashboard-url"]')?.getAttribute('content') || '/dashboard';
+            const csrfToken = getMetaContent('csrf-token');
 
             const savedRules = loadSavedRules();
             formData.saved_rules = savedRules;
             
-            fetch(saveUrl, {
-                method: saveMethod,
+            fetch(saveFormUrl, {
+                method: saveFormMethod,
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': csrfToken,
@@ -1207,16 +2988,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 return data;
             })
             .then(data => {
+                if (data.form_id) {
+                    formId = data.form_id;
+                    setMetaContent('form-id', formId);
+                    if (rootElement) {
+                        rootElement.setAttribute('data-form-id', formId);
+                    }
+                }
+
+                if (data.update_url) {
+                    saveFormUrl = data.update_url;
+                    setMetaContent('save-form-url', saveFormUrl);
+                }
+
+                if (data.save_method) {
+                    saveFormMethod = data.save_method.toUpperCase();
+                    setMetaContent('save-form-method', saveFormMethod);
+                } else if (saveFormMethod !== 'PUT') {
+                    saveFormMethod = 'PUT';
+                    setMetaContent('save-form-method', 'PUT');
+                }
+
+                if (data.share_url) {
+                    shareLinkUrl = data.share_url;
+                    if (rootElement) {
+                        rootElement.setAttribute('data-share-url', shareLinkUrl);
+                    }
+                    updateShareButtonVisibility();
+                }
+
+                formMode = 'edit';
+                const saveBtnLabel = saveFormBtn.querySelector('span');
+                if (saveBtnLabel) {
+                    saveBtnLabel.textContent = 'Update Form';
+                }
+
                 showSuccessDialog(data.message || 'Form berhasil disimpan!');
-                setTimeout(() => {
-                    window.location.href = dashboardUrl;
-                }, 2000);
             })
             .catch(error => {
                 console.error('Error:', error);
                 alert(error.message || 'Terjadi kesalahan saat menyimpan form. Silakan coba lagi.');
+            })
+            .finally(() => {
                 saveFormBtn.disabled = false;
-                saveFormBtn.innerHTML = originalButtonHtml;
+                saveFormBtn.innerHTML = saveFormBtn.getAttribute('data-original-html') || originalButtonHtml;
             });
         });
     }
@@ -1231,6 +3046,7 @@ function attachQuestionCardEvents(card) {
         deleteBtn.addEventListener('click', function() {
             card.remove();
             updateQuestionNumbers();
+            updateMainButtonsVisibility();
         });
     }
     
@@ -1248,9 +3064,20 @@ function attachQuestionCardEvents(card) {
             card.parentNode.insertBefore(newCard, card.nextSibling);
             updateQuestionNumbers();
             attachQuestionCardEvents(newCard);
+            updateMainButtonsVisibility();
         });
     }
     
+    // More options panel
+    const moreOptionsBtn = card.querySelector('.more-options-btn');
+    const advancedSettings = card.querySelector('.question-advanced-settings');
+    if (moreOptionsBtn && advancedSettings) {
+        moreOptionsBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            advancedSettings.classList.toggle('hidden');
+        });
+    }
+
     // Question type dropdown
     const typeDropdownBtn = card.querySelector('.question-type-dropdown-btn');
     const typeDropdown = card.querySelector('.question-type-dropdown');
@@ -1312,6 +3139,92 @@ function attachQuestionCardEvents(card) {
     // Attach option events
     attachOptionEvents(card);
     
+    // Quick add buttons
+    const quickAddButtons = card.querySelector('.question-quick-add-buttons');
+    const quickAddQuestionBtn = card.querySelector('.quick-add-question-btn');
+    const quickAddSectionBtn = card.querySelector('.quick-add-section-btn');
+    const quickAddResultSettingBtn = card.querySelector('.quick-add-result-setting-btn');
+    
+    // Check if form has result rules
+    const hasResultRules = () => {
+        const resultRulesContainer = document.getElementById('result-rules-container');
+        if (!resultRulesContainer) return false;
+        const placeholder = resultRulesContainer.querySelector('.result-rules-placeholder');
+        const ruleCards = resultRulesContainer.querySelectorAll('.result-rule-card');
+        return !placeholder && ruleCards.length > 0;
+    };
+    
+    // Function to show/hide quick add buttons
+    const showQuickAddButtons = () => {
+        if (quickAddButtons) {
+            quickAddButtons.classList.remove('hidden');
+            // Show/hide setup hasil button based on result rules
+            if (quickAddResultSettingBtn) {
+                if (hasResultRules()) {
+                    quickAddResultSettingBtn.classList.remove('hidden');
+                    quickAddResultSettingBtn.classList.add('flex');
+                } else {
+                    quickAddResultSettingBtn.classList.add('hidden');
+                    quickAddResultSettingBtn.classList.remove('flex');
+                }
+            }
+        }
+    };
+    
+    const hideQuickAddButtons = () => {
+        if (quickAddButtons) {
+            quickAddButtons.classList.add('hidden');
+        }
+    };
+    
+    // Quick add question button
+    if (quickAddQuestionBtn) {
+        quickAddQuestionBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (questionsContainer) {
+                const questionCard = createQuestionCard('short-answer');
+                questionsContainer.insertBefore(questionCard, card.nextSibling);
+                updateQuestionNumbers();
+                attachQuestionCardEvents(questionCard);
+                initSortable();
+                updateMainButtonsVisibility();
+                
+                setTimeout(() => {
+                    const titleInput = questionCard.querySelector('.question-title');
+                    if (titleInput) {
+                        titleInput.focus();
+                    }
+                }, 100);
+            }
+        });
+    }
+    
+    // Quick add section button
+    if (quickAddSectionBtn) {
+        quickAddSectionBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (questionsContainer) {
+                const sectionDivider = createSectionDivider();
+                questionsContainer.insertBefore(sectionDivider, card.nextSibling);
+                attachSectionEvents(sectionDivider);
+                
+                const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', function() {
+                        sectionDivider.remove();
+                        updateSectionNumbers();
+                        updateMainButtonsVisibility();
+                    });
+                }
+                
+                initSortable();
+                updateMainButtonsVisibility();
+            }
+        });
+    }
+    
     // Active state highlight saat focus pada input pertanyaan
     const questionTitle = card.querySelector('.question-title');
     if (questionTitle) {
@@ -1320,22 +3233,57 @@ function attachQuestionCardEvents(card) {
             document.querySelectorAll('.question-card').forEach(c => {
                 c.classList.remove('ring-2', 'ring-red-600', 'border-red-600');
                 c.classList.add('border-gray-200');
+                const quickAdd = c.querySelector('.question-quick-add-buttons');
+                if (quickAdd) {
+                    quickAdd.classList.add('hidden');
+                }
             });
             // Add active ke card ini
             card.classList.add('ring-2', 'ring-red-600', 'border-red-600');
             card.classList.remove('border-gray-200');
+            showQuickAddButtons();
         });
     }
     
     // Click pada card juga trigger highlight
     card.addEventListener('click', function(e) {
-        // Jangan trigger jika klik pada button atau input yang sudah ada handler
-        if (e.target.closest('button') || e.target.closest('input[type="file"]') || e.target.closest('.question-type-dropdown')) {
+        const shouldSkipFocus = e.target.closest('button')
+            || e.target.closest('input')
+            || e.target.closest('textarea')
+            || e.target.closest('select')
+            || e.target.closest('.question-type-dropdown')
+            || e.target.closest('.question-advanced-settings')
+            || e.target.closest('.option-item')
+            || e.target.closest('.question-quick-add-buttons');
+
+        if (shouldSkipFocus) {
             return;
         }
-        // Focus ke input pertanyaan
+
+        // Remove active dari semua cards
+        document.querySelectorAll('.question-card').forEach(c => {
+            c.classList.remove('ring-2', 'ring-red-600', 'border-red-600');
+            c.classList.add('border-gray-200');
+            const quickAdd = c.querySelector('.question-quick-add-buttons');
+            if (quickAdd) {
+                quickAdd.classList.add('hidden');
+            }
+        });
+        
+        // Add active ke card ini
+        card.classList.add('ring-2', 'ring-red-600', 'border-red-600');
+        card.classList.remove('border-gray-200');
+        showQuickAddButtons();
+
         if (questionTitle) {
             questionTitle.focus();
+        }
+    });
+    
+    // Hide quick add buttons when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!card.contains(e.target)) {
+            hideQuickAddButtons();
         }
     });
     
@@ -1372,6 +3320,40 @@ function attachQuestionCardEvents(card) {
     const imageArea = card.querySelector('.question-image-area');
     const questionImage = card.querySelector('.question-image');
     const removeImageBtn = card.querySelector('.remove-image-btn');
+    const imageValueInput = card.querySelector('.question-image-value');
+    const imageSettings = card.querySelector('.question-image-settings');
+    const alignmentSelect = card.querySelector('.image-alignment-select');
+    const widthRange = card.querySelector('.image-width-range');
+    const widthDisplay = card.querySelector('.image-width-display');
+
+    const updateImageWidthDisplay = () => {
+        if (widthDisplay && widthRange) {
+            widthDisplay.textContent = `${widthRange.value}%`;
+        }
+    };
+
+    const showImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.remove('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.remove('hidden');
+        }
+        updateImageWidthDisplay();
+    };
+
+    const hideImageControls = () => {
+        if (imageArea) {
+            imageArea.classList.add('hidden');
+        }
+        if (imageSettings) {
+            imageSettings.classList.add('hidden');
+        }
+    };
+
+    if (widthRange) {
+        widthRange.addEventListener('input', updateImageWidthDisplay);
+    }
     
     if (addImageBtn && imageFileInput) {
         addImageBtn.addEventListener('click', function() {
@@ -1388,9 +3370,10 @@ function attachQuestionCardEvents(card) {
                     if (questionImage) {
                         questionImage.src = e.target.result;
                     }
-                    if (imageArea) {
-                        imageArea.classList.remove('hidden');
+                    if (imageValueInput) {
+                        imageValueInput.value = e.target.result;
                     }
+                    showImageControls();
                 };
                 reader.readAsDataURL(file);
             }
@@ -1400,22 +3383,31 @@ function attachQuestionCardEvents(card) {
     if (questionImage) {
         questionImage.addEventListener('error', function() {
             questionImage.removeAttribute('src');
-            if (imageArea) {
-                imageArea.classList.add('hidden');
+            hideImageControls();
+            if (imageValueInput) {
+                imageValueInput.value = '';
             }
         });
     }
     
     if (removeImageBtn) {
         removeImageBtn.addEventListener('click', function() {
-            if (imageArea) {
-                imageArea.classList.add('hidden');
-            }
+            hideImageControls();
             if (questionImage) {
                 questionImage.src = '';
             }
             if (imageFileInput) {
                 imageFileInput.value = '';
+            }
+            if (imageValueInput) {
+                imageValueInput.value = '';
+            }
+            if (alignmentSelect) {
+                alignmentSelect.value = 'center';
+            }
+            if (widthRange) {
+                widthRange.value = 100;
+                updateImageWidthDisplay();
             }
         });
     }
@@ -1449,20 +3441,23 @@ function attachOptionEvents(card) {
     // Show remove button on hover untuk option items
     const optionItems = card.querySelectorAll('.option-item');
     optionItems.forEach(item => {
-        item.addEventListener('mouseenter', function() {
-            const removeBtn = this.querySelector('.remove-option-btn');
-            if (removeBtn) {
-                removeBtn.classList.remove('opacity-0');
-                removeBtn.classList.add('opacity-100');
-            }
-        });
-        item.addEventListener('mouseleave', function() {
-            const removeBtn = this.querySelector('.remove-option-btn');
-            if (removeBtn) {
-                removeBtn.classList.add('opacity-0');
-                removeBtn.classList.remove('opacity-100');
-            }
-        });
+        if (!item.hasAttribute('data-hover-listener')) {
+            item.setAttribute('data-hover-listener', 'true');
+            item.addEventListener('mouseenter', function() {
+                const removeBtn = this.querySelector('.remove-option-btn');
+                if (removeBtn) {
+                    removeBtn.classList.remove('opacity-0');
+                    removeBtn.classList.add('opacity-100');
+                }
+            });
+            item.addEventListener('mouseleave', function() {
+                const removeBtn = this.querySelector('.remove-option-btn');
+                if (removeBtn) {
+                    removeBtn.classList.add('opacity-0');
+                    removeBtn.classList.remove('opacity-100');
+                }
+            });
+        }
     });
     
     // Add option button
@@ -1471,71 +3466,22 @@ function attachOptionEvents(card) {
         if (!btn.hasAttribute('data-listener')) {
             btn.setAttribute('data-listener', 'true');
             btn.addEventListener('click', function() {
-                const container = card.querySelector('.question-input-area > div');
-                const addSection = btn.closest('.mt-2.space-y-1');
-                const optionCount = container ? container.querySelectorAll('.option-item').length + 1 : 1;
-                const type = card.getAttribute('data-question-type');
-                let newOption;
-                
-                if (type === 'multiple-choice') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                placeholder="Opsi ${optionCount}" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else if (type === 'checkbox') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                placeholder="Opsi ${optionCount}" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else if (type === 'dropdown') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <span class="text-sm text-gray-500 w-4">${optionCount}.</span>
-                            <input 
-                                type="text" 
-                                placeholder="Opsi ${optionCount}" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
+                const container = card.querySelector('[data-option-container="true"]');
+                const controls = card.querySelector('.option-controls');
+                if (!container) {
+                    return;
                 }
-                
-                if (newOption && container) {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = newOption;
-                    const newOptionEl = tempDiv.firstElementChild;
-                    if (addSection && newOptionEl) {
-                        container.insertBefore(newOptionEl, addSection);
-                        attachOptionEvents(card);
-                        updateQuestionNumbers();
+                const optionCount = container.querySelectorAll('.option-item').length;
+                const type = card.getAttribute('data-question-type');
+                const newOptionEl = createOptionElementNode(type, '', optionCount);
+                if (newOptionEl) {
+                    if (controls) {
+                        container.insertBefore(newOptionEl, controls);
+                    } else {
+                        container.appendChild(newOptionEl);
                     }
+                    attachOptionEvents(card);
+                    updateQuestionNumbers();
                 }
             });
         }
@@ -1547,50 +3493,20 @@ function attachOptionEvents(card) {
         if (!btn.hasAttribute('data-listener')) {
             btn.setAttribute('data-listener', 'true');
             btn.addEventListener('click', function() {
-                const inputArea = card.querySelector('.question-input-area > div');
-                const optionCount = inputArea.querySelectorAll('.option-item').length + 1;
-                const type = card.getAttribute('data-question-type');
-                let newOption;
-                
-                if (type === 'multiple-choice') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="radio" disabled class="text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                value="Lainnya" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else if (type === 'checkbox') {
-                    newOption = `
-                        <div class="option-item flex items-center space-x-2">
-                            <input type="checkbox" disabled class="rounded border-gray-300 text-red-600 focus:ring-red-500 mt-1">
-                            <input 
-                                type="text" 
-                                value="Lainnya" 
-                                class="flex-1 px-0 py-1 text-sm text-gray-500 border-none border-b border-transparent focus:border-red-600 focus:outline-none transition-colors option-input"
-                            >
-                            <button class="remove-option-btn p-1 text-gray-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Hapus opsi">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
+                const container = card.querySelector('[data-option-container="true"]');
+                if (!container) {
+                    return;
                 }
-                
-                if (newOption) {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = newOption;
-                    const addBtnContainer = btn.parentElement;
-                    addBtnContainer.insertBefore(tempDiv.firstElementChild, btn);
+                const controls = card.querySelector('.option-controls');
+                const optionCount = container.querySelectorAll('.option-item').length;
+                const type = card.getAttribute('data-question-type');
+                const newOptionEl = createOptionElementNode(type, 'Lainnya', optionCount);
+                if (newOptionEl) {
+                    if (controls) {
+                        container.insertBefore(newOptionEl, controls);
+                    } else {
+                        container.appendChild(newOptionEl);
+                    }
                     attachOptionEvents(card);
                 }
             });
@@ -1633,17 +3549,25 @@ function collectFormData() {
         sections: [],
         questions: [],
         answer_templates: [],
-        result_rules: []
+        result_rules: [],
+        result_settings: []
     };
 
     // Collect sections
     const sections = document.querySelectorAll('.section-divider');
     sections.forEach((section, index) => {
-        const titleEl = section.querySelector('.section-title');
-        const descEl = section.querySelector('.section-description');
+        const titleInput = section.querySelector('.section-title-input');
+        const descInput = section.querySelector('.section-description-input');
+        const imageValueInput = section.querySelector('.section-image-value');
+        const alignmentSelect = section.querySelector('.section-image-alignment-select');
+        const wrapModeSelect = section.querySelector('.section-image-wrap-mode-select');
+        
         formData.sections.push({
-            title: titleEl?.textContent || null,
-            description: descEl?.textContent || null
+            title: titleInput?.value?.trim() || null,
+            description: descInput?.value?.trim() || null,
+            image: imageValueInput?.value?.trim() || null,
+            image_alignment: alignmentSelect?.value || 'center',
+            image_wrap_mode: wrapModeSelect?.value || 'fixed',
         });
     });
 
@@ -1705,26 +3629,66 @@ function collectFormData() {
             return;
         }
 
+        const extraSettingsPayload = {
+            validation: questionCard.querySelector('.question-validation-input')?.value?.trim() || null,
+            validation_message: questionCard.querySelector('.question-validation-message')?.value?.trim() || null,
+            extra_notes: questionCard.querySelector('.question-extra-notes')?.value?.trim() || null,
+            min_length: questionCard.querySelector('.question-min-length')?.value || null,
+            max_length: questionCard.querySelector('.question-max-length')?.value || null,
+        };
+
+        if (extraSettingsPayload.min_length !== null && extraSettingsPayload.min_length !== '') {
+            extraSettingsPayload.min_length = parseInt(extraSettingsPayload.min_length, 10);
+        } else {
+            extraSettingsPayload.min_length = null;
+        }
+
+        if (extraSettingsPayload.max_length !== null && extraSettingsPayload.max_length !== '') {
+            extraSettingsPayload.max_length = parseInt(extraSettingsPayload.max_length, 10);
+        } else {
+            extraSettingsPayload.max_length = null;
+        }
+
         const questionData = {
             type: questionCard.getAttribute('data-question-type') || 'short-answer',
             title: questionCard.querySelector('.question-title')?.value || '',
             description: questionCard.querySelector('.question-description')?.value || '',
             is_required: questionCard.querySelector('.required-checkbox')?.checked || false,
-            options: []
+            options: [],
+            extra_settings: extraSettingsPayload,
         };
+
+        const extraValues = Object.values(questionData.extra_settings);
+        if (extraValues.every(value => value === null || value === '')) {
+            delete questionData.extra_settings;
+        }
 
         if (currentSectionIndex >= 0) {
             questionData.section_id = currentSectionIndex;
         }
 
+        const imageValueInput = questionCard.querySelector('.question-image-value');
+        const imageAlignmentSelect = questionCard.querySelector('.image-alignment-select');
+        const imageWidthRange = questionCard.querySelector('.image-width-range');
         const imageArea = questionCard.querySelector('.question-image-area');
         const questionImageEl = questionCard.querySelector('.question-image');
-        if (imageArea && questionImageEl && !imageArea.classList.contains('hidden')) {
+
+        // Prioritize imageValueInput (contains base64 for new uploads or storage path for existing)
+        if (imageValueInput && imageValueInput.value && imageValueInput.value.trim() !== '') {
+            questionData.image = imageValueInput.value.trim();
+        } else if (imageArea && questionImageEl && !imageArea.classList.contains('hidden')) {
+            // Fallback to src attribute if imageValueInput is empty
             const src = questionImageEl.getAttribute('src');
             if (src && src.trim() !== '') {
                 questionData.image = src;
             }
+        } else {
+            questionData.image = null;
         }
+
+        // Always set alignment and width from controls
+        questionData.image_alignment = imageAlignmentSelect?.value || 'center';
+        questionData.image_width = imageWidthRange ? parseInt(imageWidthRange.value, 10) : null;
 
         if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionData.type)) {
             const optionItems = questionCard.querySelectorAll('.option-item');
@@ -1732,9 +3696,14 @@ function collectFormData() {
                 const optionInput = optionItem.querySelector('.option-input');
                 const optionText = optionInput ? optionInput.value : '';
                 if (optionText && optionText.trim() !== '') {
+                    const templateDataset = optionInput?.dataset?.templateIndex ?? optionItem?.dataset?.templateIndex;
+                    const templateIndex = templateDataset !== undefined && templateDataset !== null && templateDataset !== ''
+                        ? parseInt(templateDataset, 10)
+                        : null;
+
                     questionData.options.push({
                         text: optionText.trim(),
-                        answer_template_id: null
+                        answer_template_index: Number.isInteger(templateIndex) ? templateIndex : null,
                     });
                 }
             });
@@ -1755,6 +3724,32 @@ function collectFormData() {
 
         if (questionData.title) {
             formData.questions.push(questionData);
+        }
+    });
+    
+    // Collect result settings (always at the bottom)
+    const resultSettingCards = questionsContainer.querySelectorAll('.result-setting-card');
+    resultSettingCards.forEach((card) => {
+        const ruleSelect = card.querySelector('.result-setting-rule-select');
+        const textArea = card.querySelector('.result-setting-text');
+        const imageValueInput = card.querySelector('.result-setting-image-value');
+        const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
+        const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
+        
+        const resultRuleIndex = ruleSelect ? parseInt(ruleSelect.value) : null;
+        const resultText = textArea ? textArea.value.trim() : null;
+        const image = imageValueInput ? imageValueInput.value.trim() : null;
+        const imageAlignment = alignmentSelect ? alignmentSelect.value : 'center';
+        const textAlignment = textAlignmentSelect ? textAlignmentSelect.value : 'center';
+        
+        if (resultRuleIndex !== null && resultRuleIndex >= 0) {
+            formData.result_settings.push({
+                result_rule_index: resultRuleIndex,
+                result_text: resultText,
+                image: image || null,
+                image_alignment: imageAlignment,
+                text_alignment: textAlignment,
+            });
         }
     });
 
@@ -1804,6 +3799,73 @@ function showSuccessDialog(message) {
             modal.remove();
         }
     }, 3000);
+}
+
+function openShareModal(link) {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Bagikan Formulir</h3>
+            <p class="text-sm text-gray-600 mb-4">Salin tautan berikut dan bagikan kepada responden Anda.</p>
+            <div class="flex items-center space-x-2">
+                <input type="text" readonly class="share-link-input flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none" value="">
+                <button type="button" data-share-copy class="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg">Salin</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">Tautan ini akan membawa responden ke halaman pengisian form.</p>
+            <div class="flex justify-end mt-6">
+                <button type="button" data-share-close class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-red-600">Tutup</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const input = modal.querySelector('.share-link-input');
+    if (input) {
+        input.value = link;
+        input.focus();
+        input.select();
+    }
+
+    const closeModal = () => {
+        modal.remove();
+    };
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    const closeBtn = modal.querySelector('[data-share-close]');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeModal);
+    }
+
+    const copyBtn = modal.querySelector('[data-share-copy]');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+            try {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(link);
+                } else if (input) {
+                    input.select();
+                    document.execCommand('copy');
+                }
+                copyBtn.textContent = 'Disalin!';
+                copyBtn.classList.remove('bg-red-600');
+                copyBtn.classList.add('bg-green-600');
+                setTimeout(() => {
+                    copyBtn.textContent = 'Salin';
+                    copyBtn.classList.remove('bg-green-600');
+                    copyBtn.classList.add('bg-red-600');
+                }, 1500);
+            } catch (error) {
+                alert('Gagal menyalin tautan. Silakan salin secara manual.');
+            }
+        });
+    }
 }
 
 function updateThemeColorSelection(color) {
@@ -1859,6 +3921,28 @@ function populateFormBuilder(data) {
         return;
     }
 
+    // Clear all form data first to ensure no data from previous form remains
+    const answerTemplatesContainer = document.getElementById('answer-templates-container');
+    const resultRulesContainer = document.getElementById('result-rules-container');
+    const questionsContainer = document.getElementById('questions-container');
+    
+    // Clear saved rules state (this is global, but we want to ensure clean state)
+    // Note: savedRulesState is for global presets, not form-specific rules
+    // Form-specific rules come from data.answer_templates and data.result_rules
+    
+    if (answerTemplatesContainer) {
+        answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
+    }
+    
+    if (resultRulesContainer) {
+        resultRulesContainer.innerHTML = getResultRulesPlaceholder();
+    }
+    
+    if (questionsContainer) {
+        // Clear all questions, sections, and result settings
+        questionsContainer.innerHTML = '';
+    }
+
     const titleInput = document.getElementById('form-title');
     if (titleInput) {
         titleInput.value = data.title || '';
@@ -1885,17 +3969,18 @@ function populateFormBuilder(data) {
         checkbox.dispatchEvent(new Event('change'));
     });
 
-    const answerTemplatesContainer = document.getElementById('answer-templates-container');
     if (answerTemplatesContainer) {
+        // Ensure container is cleared first
         answerTemplatesContainer.innerHTML = '';
+        
         const templates = Array.isArray(data.answer_templates) ? data.answer_templates : [];
 
         if (templates.length === 0) {
-            answerTemplatesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+            answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
             updateRuleSaveControlsVisibility();
         } else {
             templates.forEach((template) => {
-                const templateCard = createAnswerTemplateCard();
+                const templateCard = createAnswerTemplateCard(template.id || null);
                 answerTemplatesContainer.appendChild(templateCard);
 
                 const textInput = templateCard.querySelector('.answer-template-text');
@@ -1907,12 +3992,42 @@ function populateFormBuilder(data) {
                     scoreInput.value = template.score ?? 0;
                 }
 
+                // Delete button event listener is already attached in appendAnswerTemplateCard
+                // But we need to re-attach it here since we're creating the card directly
                 const deleteBtn = templateCard.querySelector('.delete-answer-template-btn');
-                if (deleteBtn) {
-                    deleteBtn.addEventListener('click', function () {
+                if (deleteBtn && !deleteBtn.hasAttribute('data-listener')) {
+                    deleteBtn.setAttribute('data-listener', 'true');
+                    deleteBtn.addEventListener('click', async function() {
+                        const dbId = templateCard.getAttribute('data-db-id');
+                        const formId = getMetaContent('form-id');
+                        
+                        // If form is saved and template has database ID, delete from database
+                        if (formId && dbId) {
+                            try {
+                                const response = await fetch(`/forms/${formId}/answer-templates/${dbId}`, {
+                                    method: 'DELETE',
+                                    headers: {
+                                        'X-CSRF-TOKEN': getMetaContent('csrf-token'),
+                                        'X-Requested-With': 'XMLHttpRequest',
+                                        'Accept': 'application/json',
+                                    },
+                                });
+                                
+                                const data = await response.json();
+                                if (!response.ok || !data.success) {
+                                    throw new Error(data.message || 'Gagal menghapus template.');
+                                }
+                            } catch (error) {
+                                console.error('Error deleting template:', error);
+                                alert('Gagal menghapus template dari database: ' + error.message);
+                                return; // Don't remove from DOM if database delete failed
+                            }
+                        }
+                        
+                        // Remove from DOM
                         templateCard.remove();
                         if (answerTemplatesContainer.children.length === 0) {
-                            answerTemplatesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
+                            answerTemplatesContainer.innerHTML = getAnswerTemplatesPlaceholder();
                         }
                         updateRuleSaveControlsVisibility();
                     });
@@ -1922,16 +4037,17 @@ function populateFormBuilder(data) {
         }
     }
 
-    const resultRulesContainer = document.getElementById('result-rules-container');
     if (resultRulesContainer) {
+        // Ensure container is cleared first
         resultRulesContainer.innerHTML = '';
+        
         const rules = Array.isArray(data.result_rules) ? data.result_rules : [];
 
         if (rules.length === 0) {
-            resultRulesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
+            resultRulesContainer.innerHTML = getResultRulesPlaceholder();
         } else {
             rules.forEach((rule) => {
-                const ruleCard = createResultRuleCard();
+                const ruleCard = createResultRuleCard(rule.id || null);
                 resultRulesContainer.appendChild(ruleCard);
 
                 const conditionSelect = ruleCard.querySelector('.rule-condition-type');
@@ -1976,20 +4092,12 @@ function populateFormBuilder(data) {
                     }
                 });
 
-                const deleteRuleBtn = ruleCard.querySelector('.delete-result-rule-btn');
-                if (deleteRuleBtn) {
-                    deleteRuleBtn.addEventListener('click', function () {
-                        ruleCard.remove();
-                        if (resultRulesContainer.children.length === 0) {
-                            resultRulesContainer.innerHTML = '<div class="text-sm text-gray-500 italic">Belum ada aturan hasil. Klik "Tambah Aturan" untuk menambahkan.</div>';
-                        }
-                    });
-                }
+                // Attach events to rule card (including delete button)
+                attachResultRuleEvents(ruleCard, resultRulesContainer);
             });
         }
     }
 
-    const questionsContainer = document.getElementById('questions-container');
     if (!questionsContainer) {
         return;
     }
@@ -1998,111 +4106,101 @@ function populateFormBuilder(data) {
 
     const sections = Array.isArray(data.sections) ? data.sections : [];
     const questions = Array.isArray(data.questions) ? data.questions : [];
-    let currentSectionIndex = -1;
 
-    questions.forEach((questionData) => {
-        if (
-            questionData &&
-            questionData.section_id !== undefined &&
-            questionData.section_id !== null &&
-            questionData.section_id !== currentSectionIndex
-        ) {
-            currentSectionIndex = questionData.section_id;
-            const sectionDivider = createSectionDivider();
-            questionsContainer.appendChild(sectionDivider);
+    const batchSize = questions.length > 8 ? 1 : 3;
 
-            const sectionInfo = sections[currentSectionIndex] || null;
-            const sectionTitleEl = sectionDivider.querySelector('.section-title');
-            if (sectionTitleEl) {
-                sectionTitleEl.textContent = sectionInfo && sectionInfo.title
-                    ? sectionInfo.title
-                    : `Bagian ${currentSectionIndex + 1}`;
+    renderQuestionsIncrementally({
+        questions,
+        sections,
+        container: questionsContainer,
+        batchSize,
+        onComplete: () => {
+            updateMainButtonsVisibility();
+            if (questions.length === 0) {
+                const defaultQuestion = createQuestionCard('short-answer');
+                questionsContainer.appendChild(defaultQuestion);
+                attachQuestionCardEvents(defaultQuestion);
             }
-
-            const deleteBtn = sectionDivider.querySelector('.delete-section-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', function () {
-                    sectionDivider.remove();
-                    updateSectionNumbers();
-                });
-            }
-        }
-
-        const questionType = questionData.type || 'short-answer';
-        const questionCard = createQuestionCard(questionType);
-        questionsContainer.appendChild(questionCard);
-
-        const titleInput = questionCard.querySelector('.question-title');
-        if (titleInput) {
-            titleInput.value = questionData.title || '';
-        }
-
-        const requiredCheckbox = questionCard.querySelector('.required-checkbox');
-        if (requiredCheckbox) {
-            requiredCheckbox.checked = Boolean(questionData.is_required);
-        }
-
-        const questionImage = questionCard.querySelector('.question-image');
-        const imageArea = questionCard.querySelector('.question-image-area');
-        if (questionData.image && questionImage && imageArea) {
-            questionImage.src = questionData.image;
-            imageArea.classList.remove('hidden');
-        } else if (questionImage && imageArea) {
-            questionImage.removeAttribute('src');
-            imageArea.classList.add('hidden');
-        }
-
-        if (['multiple-choice', 'checkbox', 'dropdown'].includes(questionType)) {
-            const inputArea = questionCard.querySelector('.question-input-area');
-            const options = Array.isArray(questionData.options) ? questionData.options : [];
-
-            if (inputArea) {
-                let optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
-                const addOptionBtn = questionCard.querySelector('.add-option-btn');
-
-                while (options.length > optionItems.length && addOptionBtn) {
-                    addOptionBtn.click();
-                    optionItems = Array.from(inputArea.querySelectorAll('.option-item'));
-                }
-
-                optionItems.forEach((item, idx) => {
-                    const input = item.querySelector('.option-input');
-                    if (!input) {
-                        return;
-                    }
-
-                    if (idx < options.length) {
-                        input.value = options[idx].text || '';
-                    } else if (options.length === 0) {
-                        if (idx > 1) {
-                            item.remove();
-                        } else {
-                            input.value = '';
+            
+            // Load result settings
+            const resultSettings = Array.isArray(data.result_settings) ? data.result_settings : [];
+            resultSettings.forEach((setting) => {
+                const resultSettingCard = createResultSettingCard();
+                questionsContainer.appendChild(resultSettingCard);
+                attachResultSettingEvents(resultSettingCard);
+                
+                // Populate data
+                const ruleSelect = resultSettingCard.querySelector('.result-setting-rule-select');
+                const textArea = resultSettingCard.querySelector('.result-setting-text');
+                const imageValueInput = resultSettingCard.querySelector('.result-setting-image-value');
+                const imageArea = resultSettingCard.querySelector('.result-setting-image-area');
+                const resultImage = resultSettingCard.querySelector('.result-setting-image');
+                const imageSettings = resultSettingCard.querySelector('.result-setting-image-settings');
+                const alignmentSelect = resultSettingCard.querySelector('.result-setting-image-alignment-select');
+                const textAlignmentSelect = resultSettingCard.querySelector('.result-setting-text-alignment-select');
+                
+                // Find matching result rule index (need to match by order since we don't have ID in frontend)
+                // For now, we'll use the order/index from result_rules array
+                const resultRules = Array.isArray(data.result_rules) ? data.result_rules : [];
+                // Try to find by matching texts or use index if available
+                let ruleIndex = -1;
+                if (setting.result_rule_id) {
+                    // If we have rule_id, we need to find it in the loaded rules
+                    // For now, we'll use a simple index-based approach
+                    ruleIndex = resultRules.findIndex((r, idx) => {
+                        // Try to match by result_text if available
+                        if (setting.result_text) {
+                            const ruleTexts = Array.isArray(r.texts) ? r.texts : [];
+                            return ruleTexts.some(t => t === setting.result_text);
                         }
-                    } else {
-                        item.remove();
+                        return false;
+                    });
+                }
+                
+                // If not found, try to use order/index
+                if (ruleIndex < 0 && resultRules.length > 0) {
+                    // Use first available rule as fallback
+                    ruleIndex = 0;
+                }
+                
+                if (ruleIndex >= 0 && ruleSelect) {
+                    ruleSelect.value = ruleIndex;
+                    ruleSelect.dispatchEvent(new Event('change'));
+                }
+                
+                if (textArea && setting.result_text) {
+                    textArea.value = setting.result_text;
+                }
+                
+                if (textAlignmentSelect && setting.text_alignment) {
+                    textAlignmentSelect.value = setting.text_alignment;
+                }
+                
+                if (setting.image) {
+                    const imageUrl = setting.image_url || setting.image;
+                    if (imageValueInput) {
+                        imageValueInput.value = imageUrl;
                     }
-                });
-            }
-        }
-
-        if (questionData.saved_rule) {
-            applySavedRuleToQuestion(questionCard, questionData.saved_rule);
-        }
-
-        attachQuestionCardEvents(questionCard);
-
-        if (requiredCheckbox) {
-            requiredCheckbox.dispatchEvent(new Event('change'));
-        }
+                    if (resultImage) {
+                        resultImage.src = imageUrl;
+                    }
+                    if (imageArea) {
+                        imageArea.classList.remove('hidden');
+                    }
+                    if (imageSettings) {
+                        imageSettings.classList.remove('hidden');
+                    }
+                    if (alignmentSelect && setting.image_alignment) {
+                        alignmentSelect.value = setting.image_alignment;
+                    }
+                }
+            });
+            
+            updateSectionNumbers();
+            updateQuestionNumbers();
+            updateUseRuleButtonsVisibility();
+            initSortable();
+            updateMainButtonsVisibility();
+        },
     });
-
-    if (questions.length === 0) {
-        const defaultQuestion = createQuestionCard('short-answer');
-        questionsContainer.appendChild(defaultQuestion);
-        attachQuestionCardEvents(defaultQuestion);
-    }
-
-    updateSectionNumbers();
-    updateQuestionNumbers();
 }

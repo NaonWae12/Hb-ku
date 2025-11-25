@@ -100,13 +100,13 @@
                     <!-- Action Buttons -->
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-2">
-                            <button class="px-3 py-1.5 text-sm font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-50 transition-colors">
-                                View Responses
-                            </button>
+                        <a href="{{ route('forms.responses', $form['id']) }}" class="px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                            View responses
+                        </a>
                             <a href="{{ route('forms.edit', $form['id']) }}" class="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
-                                Open Form
-                            </a>
-                        </div>
+                            Open Form
+                        </a>
+                    </div>
                         <button
                             class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors delete-form-btn"
                             data-delete-url="{{ route('forms.destroy', $form['id']) }}"
