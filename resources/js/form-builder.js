@@ -1532,13 +1532,16 @@ let answerTemplateCounter = 0;
 let resultRuleCounter = 0;
 
 // Fungsi untuk membuat answer template card
-function createAnswerTemplateCard(dbId = null) {
+function createAnswerTemplateCard(dbId = null, ruleGroupId = null) {
     answerTemplateCounter++;
     const templateCard = document.createElement('div');
     templateCard.className = 'answer-template-card bg-gray-50 rounded-lg border border-gray-200 p-4';
     templateCard.setAttribute('data-template-id', answerTemplateCounter);
     if (dbId) {
         templateCard.setAttribute('data-db-id', dbId);
+    }
+    if (ruleGroupId) {
+        templateCard.setAttribute('data-rule-group-id', ruleGroupId);
     }
     templateCard.innerHTML = `
         <div class="flex items-center space-x-3">
@@ -1608,13 +1611,16 @@ function appendAnswerTemplateCard(container) {
 }
 
 // Fungsi untuk membuat result rule card
-function createResultRuleCard(dbId = null) {
+function createResultRuleCard(dbId = null, ruleGroupId = null) {
     resultRuleCounter++;
     const ruleCard = document.createElement('div');
     ruleCard.className = 'result-rule-card bg-gray-50 rounded-lg border border-gray-200 p-4';
     ruleCard.setAttribute('data-rule-id', resultRuleCounter);
     if (dbId) {
         ruleCard.setAttribute('data-db-id', dbId);
+    }
+    if (ruleGroupId) {
+        ruleCard.setAttribute('data-rule-group-id', ruleGroupId);
     }
     ruleCard.innerHTML = `
         <div class="flex items-start justify-between mb-3">
@@ -1932,13 +1938,22 @@ function updateRuleSaveControlsVisibility() {
     }
 }
 
+function generateRuleGroupId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+
+    return `rule-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function normalizeSavedRule(rule) {
     if (!rule) {
-        return { templates: [], result_rules: [] };
+        return { templates: [], result_rules: [], rule_group_id: generateRuleGroupId() };
     }
 
     const normalized = {
         id: rule.id ?? Date.now(),
+        rule_group_id: rule.rule_group_id ?? rule.id ?? generateRuleGroupId(),
         templates: Array.isArray(rule.templates) ? rule.templates.slice() : Array.isArray(rule.answer_templates) ? rule.answer_templates.slice() : [],
         result_rules: Array.isArray(rule.result_rules) ? rule.result_rules.slice() : [],
     };
@@ -1994,9 +2009,6 @@ function renderSavedRulesChips() {
         const chip = document.createElement('div');
         chip.className = 'saved-rule-chip inline-flex items-center space-x-2 px-3 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full';
         chip.setAttribute('data-rule-index', index);
-        if (rule.id) {
-            chip.setAttribute('data-preset-id', rule.id);
-        }
 
         const descriptionParts = [];
         if (templates.length) {
@@ -2038,44 +2050,10 @@ function renderSavedRulesChips() {
 
         const removeBtn = chip.querySelector('.remove-saved-rule-btn');
         if (removeBtn) {
-            removeBtn.addEventListener('click', async function () {
-                const presetId = chip.getAttribute('data-preset-id');
-                
-                // If preset has database ID, delete from database
-                if (presetId) {
-                    try {
-                        const response = await fetch(`/form-rule-presets/${presetId}`, {
-                            method: 'DELETE',
-                            headers: {
-                                'X-CSRF-TOKEN': getMetaContent('csrf-token'),
-                                'X-Requested-With': 'XMLHttpRequest',
-                                'Accept': 'application/json',
-                            },
-                        });
-                        
-                        const data = await response.json();
-                        if (!response.ok || !data.success) {
-                            throw new Error(data.message || 'Gagal menghapus aturan dari database.');
-                        }
-                        
-                        // Update saved rules state from server response
-                        if (data.presets) {
-                            saveRulesToState(data.presets);
-                            renderSavedRulesChips();
-                            updateUseRuleButtonsVisibility();
-                            return;
-                        }
-                    } catch (error) {
-                        console.error('Error deleting preset:', error);
-                        alert('Gagal menghapus aturan dari database: ' + error.message);
-                        return; // Don't remove from DOM if database delete failed
-                    }
-                }
-                
-                // Fallback: Remove from local state if no database ID
-                const index = parseInt(chip.getAttribute('data-rule-index'), 10);
+            removeBtn.addEventListener('click', function () {
+                const indexToRemove = parseInt(chip.getAttribute('data-rule-index'), 10);
                 const current = loadSavedRules();
-                current.splice(index, 1);
+                current.splice(indexToRemove, 1);
                 saveRulesToState(current);
                 renderSavedRulesChips();
                 updateUseRuleButtonsVisibility();
@@ -2164,10 +2142,23 @@ function gatherRulesFromSettings() {
         }
     });
 
+    const ruleGroupId = generateRuleGroupId();
+
+    const enrichedTemplates = templates.map((template) => ({
+        ...template,
+        rule_group_id: template.rule_group_id ?? ruleGroupId,
+    }));
+
+    const enrichedRules = resultRules.map((rule) => ({
+        ...rule,
+        rule_group_id: rule.rule_group_id ?? ruleGroupId,
+    }));
+
     return normalizeSavedRule({
         id: Date.now(),
-        templates,
-        result_rules: resultRules,
+        rule_group_id: ruleGroupId,
+        templates: enrichedTemplates,
+        result_rules: enrichedRules,
     });
 }
 
@@ -2689,7 +2680,6 @@ function attachSavedRuleButtons() {
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Form Builder DOMContentLoaded fired');
     // Initialize tabs
     initTabs();
     
@@ -2699,9 +2689,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let formId = getMetaContent('form-id');
     let saveFormUrl = getMetaContent('save-form-url') || '/forms';
     let saveFormMethod = (getMetaContent('save-form-method') || 'POST').toUpperCase();
+    let formRulesSaveUrl = getMetaContent('form-rules-save-url') || '';
     const shareLinkBtn = document.getElementById('share-link-btn');
     let shareLinkUrl = rootElement?.getAttribute('data-share-url') || '';
-    const rulePresetUrl = getMetaContent('rule-preset-url') || '';
     const responsesDataUrl = rootElement?.getAttribute('data-responses-url') || '';
     const totalResponsesHint = Number(rootElement?.getAttribute('data-total-responses') || '0');
 
@@ -2800,14 +2790,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const saveRulesBtn = document.getElementById('save-form-rules-btn');
     if (saveRulesBtn) {
         saveRulesBtn.addEventListener('click', async function() {
-            const bundle = gatherRulesFromSettings();
-            if (!bundle) {
-                alert('Tambahkan terlebih dahulu Template Jawaban & Skor untuk menyimpan aturan.');
+            if (!formRulesSaveUrl) {
+                alert('Simpan form terlebih dahulu sebelum menyimpan aturan.');
                 return;
             }
 
-            if (!rulePresetUrl) {
-                alert('Endpoint penyimpanan aturan tidak tersedia.');
+            const formSnapshot = collectFormData();
+            const answerTemplatesPayload = formSnapshot.answer_templates || [];
+            const resultRulesPayload = formSnapshot.result_rules || [];
+
+            if (!answerTemplatesPayload.length || !resultRulesPayload.length) {
+                alert('Tambahkan template jawaban dan aturan hasil terlebih dahulu.');
                 return;
             }
 
@@ -2815,7 +2808,7 @@ document.addEventListener('DOMContentLoaded', function() {
             saveRulesBtn.textContent = 'Menyimpan...';
 
             try {
-                const response = await fetch(rulePresetUrl, {
+                const response = await fetch(formRulesSaveUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2824,22 +2817,34 @@ document.addEventListener('DOMContentLoaded', function() {
                         'Accept': 'application/json',
                     },
                     body: JSON.stringify({
-                        templates: bundle.templates ?? [],
-                        result_rules: bundle.result_rules ?? [],
+                        answer_templates: answerTemplatesPayload,
+                        result_rules: resultRulesPayload,
                     }),
                 });
 
                 const data = await response.json().catch(() => ({}));
-
                 if (!response.ok || !data.success) {
                     throw new Error(data.message || 'Gagal menyimpan aturan.');
                 }
 
-                saveRulesToState(data.presets || []);
+                const bundle = data.bundle || {
+                    templates: data.answer_templates || answerTemplatesPayload,
+                    result_rules: data.result_rules || resultRulesPayload,
+                };
+                const normalizedRule = normalizeSavedRule(bundle);
+
+                if (data.form_rules_save_url) {
+                    formRulesSaveUrl = data.form_rules_save_url;
+                    setMetaContent('form-rules-save-url', data.form_rules_save_url);
+                }
+
+                const currentRules = loadSavedRules();
+                currentRules.push(normalizedRule);
+                saveRulesToState(currentRules);
                 renderSavedRulesChips();
                 updateUseRuleButtonsVisibility();
                 resetFormRulesBuilder();
-                alert(data.message || 'Aturan berhasil disimpan.');
+                showSuccessDialog(data.message || 'Aturan form berhasil disimpan.');
             } catch (error) {
                 console.error(error);
                 alert(error.message || 'Terjadi kesalahan saat menyimpan aturan.');
@@ -3015,6 +3020,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         rootElement.setAttribute('data-share-url', shareLinkUrl);
                     }
                     updateShareButtonVisibility();
+                }
+
+                if (data.form_rules_save_url) {
+                    formRulesSaveUrl = data.form_rules_save_url;
+                    setMetaContent('form-rules-save-url', data.form_rules_save_url);
                 }
 
                 formMode = 'edit';
@@ -3571,15 +3581,45 @@ function collectFormData() {
         });
     });
 
-    // Collect answer templates
+    // Generate rule_group_id untuk mengelompokkan semua aturan form yang satu paket
+    const generateRuleGroupId = () => {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    };
+
+    // Collect answer templates (pastikan query selector menemukan elemen meskipun tab tersembunyi)
     const answerTemplates = document.querySelectorAll('.answer-template-card');
+    const resultRulesElements = document.querySelectorAll('.result-rule-card');
+    const hasAnswerTemplates = answerTemplates.length > 0;
+    const hasResultRules = resultRulesElements.length > 0;
+    
+    // Cari rule_group_id yang sudah ada dari card pertama (jika edit mode)
+    let existingRuleGroupId = null;
+    if (answerTemplates.length > 0) {
+        const firstTemplate = answerTemplates[0];
+        existingRuleGroupId = firstTemplate.getAttribute('data-rule-group-id');
+    }
+    if (!existingRuleGroupId && hasResultRules) {
+        const firstRule = document.querySelector('.result-rule-card');
+        if (firstRule) {
+            existingRuleGroupId = firstRule.getAttribute('data-rule-group-id');
+        }
+    }
+    
+    // Gunakan rule_group_id yang sudah ada jika ada, atau generate baru
+    const ruleGroupId = existingRuleGroupId || ((hasAnswerTemplates || hasResultRules) ? generateRuleGroupId() : null);
+
     answerTemplates.forEach((template) => {
         const answerText = template.querySelector('.answer-template-text')?.value;
         const score = template.querySelector('.answer-template-score')?.value || 0;
         if (answerText) {
             formData.answer_templates.push({
                 answer_text: answerText,
-                score: parseInt(score) || 0
+                score: parseInt(score) || 0,
+                rule_group_id: ruleGroupId
             });
         }
     });
@@ -3590,7 +3630,8 @@ function collectFormData() {
         const conditionType = ruleCard.querySelector('.rule-condition-type')?.value || 'range';
         const ruleData = {
             condition_type: conditionType,
-            texts: []
+            texts: [],
+            rule_group_id: ruleGroupId
         };
 
         if (conditionType === 'range') {
@@ -3980,7 +4021,7 @@ function populateFormBuilder(data) {
             updateRuleSaveControlsVisibility();
         } else {
             templates.forEach((template) => {
-                const templateCard = createAnswerTemplateCard(template.id || null);
+                const templateCard = createAnswerTemplateCard(template.id || null, template.rule_group_id || null);
                 answerTemplatesContainer.appendChild(templateCard);
 
                 const textInput = templateCard.querySelector('.answer-template-text');
@@ -4047,7 +4088,7 @@ function populateFormBuilder(data) {
             resultRulesContainer.innerHTML = getResultRulesPlaceholder();
         } else {
             rules.forEach((rule) => {
-                const ruleCard = createResultRuleCard(rule.id || null);
+                const ruleCard = createResultRuleCard(rule.id || null, rule.rule_group_id || null);
                 resultRulesContainer.appendChild(ruleCard);
 
                 const conditionSelect = ruleCard.querySelector('.rule-condition-type');

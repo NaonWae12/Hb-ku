@@ -15,6 +15,7 @@ class ResultRule extends Model
         'max_score',
         'single_score',
         'order',
+        'rule_group_id',
     ];
 
     protected $casts = [

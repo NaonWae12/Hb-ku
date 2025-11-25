@@ -62,10 +62,6 @@ class FormController extends Controller
      */
     public function create()
     {
-        $savedRules = auth()->check()
-            ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
-            : [];
-
         $responseStats = $this->responseStats();
 
         return view('forms.create', [
@@ -75,7 +71,7 @@ class FormController extends Controller
             'saveFormMethod' => 'POST',
             'formId' => null,
             'shareUrl' => null,
-            'savedRules' => $savedRules,
+            'savedRules' => [],
             'responsesStats' => $responseStats,
         ]);
     }
@@ -130,6 +126,7 @@ class FormController extends Controller
                 'edit_url' => route('forms.edit', $form),
                 'update_url' => route('forms.update', $form),
                 'save_method' => 'PUT',
+                'form_rules_save_url' => route('forms.rules.store', $form),
             ]);
 
         } catch (\Exception $e) {
@@ -174,10 +171,7 @@ class FormController extends Controller
         ]);
 
         $formData = $this->prepareFormBuilderData($form);
-
-        $savedRules = auth()->check()
-            ? auth()->user()->formRulePresets()->latest()->get()->map->toBuilderPayload()->values()->toArray()
-            : [];
+        $savedRules = $this->buildSavedRules($form);
 
         $responseStats = $this->responseStats($form, count($formData['questions'] ?? []));
 
@@ -225,21 +219,8 @@ class FormController extends Controller
                 'shuffle_questions' => $request->boolean('shuffle_questions'),
             ]);
 
-            // Hapus relasi lama sebelum sinkronisasi ulang
-            // Gunakan DB::table untuk memastikan semua data benar-benar dihapus berdasarkan form_id
-            // Hapus result_rule_texts terlebih dahulu karena ada foreign key constraint
-            \DB::table('result_rule_texts')
-                ->whereIn('result_rule_id', function($query) use ($form) {
-                    $query->select('id')
-                        ->from('result_rules')
-                        ->where('form_id', $form->id);
-                })
-                ->delete();
-            
-            // Hapus semua data berdasarkan form_id
-            \DB::table('answer_templates')->where('form_id', $form->id)->delete();
-            \DB::table('result_rules')->where('form_id', $form->id)->delete();
-            \DB::table('result_settings')->where('form_id', $form->id)->delete();
+            // Hapus semua aturan form sebelum sinkronisasi ulang
+            $this->resetFormRules($form);
             
             // Hapus questions dan sections setelah menghapus dependencies
             $form->questions()->delete();
@@ -264,6 +245,7 @@ class FormController extends Controller
                 'edit_url' => route('forms.edit', $form),
                 'update_url' => route('forms.update', $form),
                 'save_method' => 'PUT',
+                'form_rules_save_url' => route('forms.rules.store', $form),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -272,6 +254,94 @@ class FormController extends Controller
                 'message' => 'Terjadi kesalahan saat memperbarui form: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Menghapus answer template dari form.
+     */
+    public function updateRules(Request $request, Form $form)
+    {
+        if ($form->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'answer_templates' => ['required', 'array', 'min:1'],
+            'answer_templates.*.answer_text' => ['required', 'string'],
+            'answer_templates.*.score' => ['nullable', 'numeric'],
+            'answer_templates.*.rule_group_id' => ['nullable', 'string'],
+            'result_rules' => ['required', 'array', 'min:1'],
+            'result_rules.*.condition_type' => ['required', 'string', 'in:range,equal,greater,less'],
+            'result_rules.*.min_score' => ['nullable', 'integer'],
+            'result_rules.*.max_score' => ['nullable', 'integer'],
+            'result_rules.*.single_score' => ['nullable', 'integer'],
+            'result_rules.*.rule_group_id' => ['nullable', 'string'],
+            'result_rules.*.texts' => ['required', 'array', 'min:1'],
+            'result_rules.*.texts.*' => ['required', 'string'],
+        ]);
+
+        $ruleGroupId = $this->normalizeRuleGroupId($data);
+
+        try {
+            DB::beginTransaction();
+
+            $this->persistFormRules($form, $data, true);
+
+            DB::commit();
+        } catch (\Throwable $throwable) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menyimpan aturan: ' . $throwable->getMessage(),
+            ], 500);
+        }
+
+        $templatesBundle = $form->answerTemplates()
+            ->where('rule_group_id', $ruleGroupId)
+            ->orderBy('order')
+            ->get()
+            ->map(function ($template) {
+                return [
+                    'id' => $template->id,
+                    'answer_text' => $template->answer_text,
+                    'score' => $template->score,
+                    'rule_group_id' => $template->rule_group_id,
+                ];
+            })
+            ->values();
+
+        $resultRulesBundle = $form->resultRules()
+            ->where('rule_group_id', $ruleGroupId)
+            ->orderBy('order')
+            ->with(['texts' => function ($query) {
+                $query->orderBy('order');
+            }])
+            ->get()
+            ->map(function ($rule) {
+                return [
+                    'id' => $rule->id,
+                    'condition_type' => $rule->condition_type,
+                    'min_score' => $rule->min_score,
+                    'max_score' => $rule->max_score,
+                    'single_score' => $rule->single_score,
+                    'rule_group_id' => $rule->rule_group_id,
+                    'texts' => $rule->texts->pluck('result_text')->toArray(),
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Aturan form berhasil disimpan.',
+            'rule_group_id' => $ruleGroupId,
+            'bundle' => [
+                'rule_group_id' => $ruleGroupId,
+                'templates' => $templatesBundle,
+                'result_rules' => $resultRulesBundle,
+            ],
+            'form_rules_save_url' => route('forms.rules.store', $form),
+        ]);
     }
 
     /**
@@ -632,67 +702,11 @@ class FormController extends Controller
             $sectionIdMap[$index] = $section->id;
         }
 
-        $answerTemplateIdMap = [];
-        $answerTemplates = $payload['answer_templates'] ?? [];
-        $answerTemplateLookup = [];
-
-        foreach ($answerTemplates as $index => $templateData) {
-            if (!is_array($templateData)) {
-                continue;
-            }
-
-            $answerText = trim($templateData['answer_text'] ?? '');
-            if ($answerText === '') {
-                continue;
-            }
-
-            $template = $form->answerTemplates()->create([
-                'form_id' => $form->id, // Explicitly set form_id to ensure it's bound to this form
-                'answer_text' => $answerText,
-                'score' => $templateData['score'] ?? 0,
-                'order' => $index,
-            ]);
-
-            $answerTemplateIdMap[$index] = $template->id;
-            $templateKey = $this->makeTemplateLookupKey($templateData);
-            if ($templateKey) {
-                $answerTemplateLookup[$templateKey] = $template->id;
-            }
-        }
-
-        $nextTemplateOrder = count($answerTemplateLookup);
-
-        $resultRules = $payload['result_rules'] ?? [];
-        $resultRuleIdMap = [];
-
-        foreach ($resultRules as $index => $ruleData) {
-            if (!is_array($ruleData)) {
-                continue;
-            }
-
-            $rule = $form->resultRules()->create([
-                'form_id' => $form->id, // Explicitly set form_id to ensure it's bound to this form
-                'condition_type' => $ruleData['condition_type'] ?? 'range',
-                'min_score' => $ruleData['min_score'] ?? null,
-                'max_score' => $ruleData['max_score'] ?? null,
-                'single_score' => $ruleData['single_score'] ?? null,
-                'order' => $index,
-            ]);
-
-            $resultRuleIdMap[$index] = $rule->id;
-
-            foreach ($ruleData['texts'] ?? [] as $textIndex => $text) {
-                $textValue = trim($text ?? '');
-                if ($textValue === '') {
-                    continue;
-                }
-
-                $rule->texts()->create([
-                    'result_text' => $textValue,
-                    'order' => $textIndex,
-                ]);
-            }
-        }
+        $rulesContext = $this->persistFormRules($form, $payload);
+        $answerTemplateIdMap = $rulesContext['answer_template_id_map'];
+        $answerTemplateLookup = $rulesContext['answer_template_lookup'];
+        $nextTemplateOrder = $rulesContext['next_template_order'];
+        $resultRuleIdMap = $rulesContext['result_rule_id_map'];
 
         $questions = $payload['questions'] ?? [];
 
@@ -723,6 +737,10 @@ class FormController extends Controller
 
             $savedRuleTemplateIds = [];
             if (!empty($questionData['saved_rule']['templates']) && is_array($questionData['saved_rule']['templates'])) {
+                $savedRuleGroupId = data_get($questionData, 'saved_rule.rule_group_id')
+                    ?? data_get($questionData, 'saved_rule.id')
+                    ?? (string) Str::uuid();
+
                 foreach ($questionData['saved_rule']['templates'] as $templateIndex => $templateData) {
                     $templateKey = $this->makeTemplateLookupKey($templateData);
                     if (!$templateKey) {
@@ -734,6 +752,7 @@ class FormController extends Controller
                             'answer_text' => $templateData['answer_text'] ?? $templateData['text'] ?? 'Jawaban',
                             'score' => $templateData['score'] ?? 0,
                             'order' => $nextTemplateOrder++,
+                            'rule_group_id' => $templateData['rule_group_id'] ?? $savedRuleGroupId,
                         ]);
 
                         $answerTemplateLookup[$templateKey] = $template->id;
@@ -769,37 +788,7 @@ class FormController extends Controller
             }
         }
 
-        // Handle result settings
-        $resultSettings = $payload['result_settings'] ?? [];
-        foreach ($resultSettings as $index => $settingData) {
-            if (!is_array($settingData)) {
-                continue;
-            }
-
-            $resultRuleId = null;
-            if (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
-                $resultRuleId = $resultRuleIdMap[$settingData['result_rule_index']];
-            }
-
-            // Get result text from result rule if not provided
-            $resultText = $settingData['result_text'] ?? null;
-            if (!$resultText && $resultRuleId) {
-                $rule = $form->resultRules()->find($resultRuleId);
-                if ($rule && $rule->texts->isNotEmpty()) {
-                    $resultText = $rule->texts->first()->result_text;
-                }
-            }
-
-            $form->resultSettings()->create([
-                'form_id' => $form->id, // Explicitly set form_id
-                'result_rule_id' => $resultRuleId,
-                'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
-                'image_alignment' => $settingData['image_alignment'] ?? 'center',
-                'result_text' => $resultText,
-                'text_alignment' => $settingData['text_alignment'] ?? 'center',
-                'order' => $index,
-            ]);
-        }
+        $this->syncResultSettings($form, $payload, $resultRuleIdMap);
     }
 
     /**
@@ -836,6 +825,7 @@ class FormController extends Controller
                     'id' => $template->id,
                     'answer_text' => $template->answer_text,
                     'score' => $template->score,
+                    'rule_group_id' => $template->rule_group_id,
                 ];
             })->toArray();
 
@@ -883,6 +873,7 @@ class FormController extends Controller
                     'min_score' => $rule->min_score,
                     'max_score' => $rule->max_score,
                     'single_score' => $rule->single_score,
+                    'rule_group_id' => $rule->rule_group_id,
                     'texts' => $rule->texts
                         ->sortBy('order')
                         ->pluck('result_text')
@@ -921,6 +912,210 @@ class FormController extends Controller
             'result_rules' => $resultRulesData,
             'result_settings' => $resultSettingsData,
         ];
+    }
+
+    private function buildSavedRules(Form $form): array
+    {
+        $templatesByGroup = $form->answerTemplates
+            ->groupBy(function ($template) {
+                return $template->rule_group_id ?? 'default';
+            });
+
+        $rulesByGroup = $form->resultRules
+            ->groupBy(function ($rule) {
+                return $rule->rule_group_id ?? 'default';
+            });
+
+        $groupIds = $templatesByGroup->keys()
+            ->merge($rulesByGroup->keys())
+            ->unique();
+
+        return $groupIds->map(function ($groupId) use ($templatesByGroup, $rulesByGroup) {
+            $templates = $templatesByGroup->get($groupId, collect())->map(function ($template) {
+                return [
+                    'id' => $template->id,
+                    'answer_text' => $template->answer_text,
+                    'score' => $template->score,
+                    'rule_group_id' => $template->rule_group_id,
+                ];
+            })->values();
+
+            $rules = $rulesByGroup->get($groupId, collect())->map(function ($rule) {
+                return [
+                    'id' => $rule->id,
+                    'condition_type' => $rule->condition_type,
+                    'min_score' => $rule->min_score,
+                    'max_score' => $rule->max_score,
+                    'single_score' => $rule->single_score,
+                    'rule_group_id' => $rule->rule_group_id,
+                    'texts' => $rule->texts->sortBy('order')->pluck('result_text')->toArray(),
+                ];
+            })->values();
+
+            if ($templates->isEmpty()) {
+                return null;
+            }
+
+            return [
+                'rule_group_id' => $groupId === 'default' ? null : $groupId,
+                'templates' => $templates,
+                'result_rules' => $rules,
+            ];
+        })->filter()->values()->toArray();
+    }
+
+    private function persistFormRules(Form $form, array $payload, bool $append = false): array
+    {
+        $answerTemplateIdMap = [];
+        $answerTemplateLookup = [];
+        $answerTemplates = $payload['answer_templates'] ?? [];
+
+        $templateOrderBase = $append
+            ? ((int) ($form->answerTemplates()->max('order') ?? -1) + 1)
+            : 0;
+        $ruleOrderBase = $append
+            ? ((int) ($form->resultRules()->max('order') ?? -1) + 1)
+            : 0;
+
+        foreach ($answerTemplates as $index => $templateData) {
+            if (!is_array($templateData)) {
+                continue;
+            }
+
+            $answerText = trim($templateData['answer_text'] ?? '');
+            if ($answerText === '') {
+                continue;
+            }
+
+            $ruleGroupId = $templateData['rule_group_id'] ?? (string) Str::uuid();
+
+            $template = $form->answerTemplates()->create([
+                'form_id' => $form->id,
+                'answer_text' => $answerText,
+                'score' => $templateData['score'] ?? 0,
+                'order' => $templateOrderBase + $index,
+                'rule_group_id' => $ruleGroupId,
+            ]);
+
+            $answerTemplateIdMap[$index] = $template->id;
+            $templateKey = $this->makeTemplateLookupKey($templateData);
+            if ($templateKey) {
+                $answerTemplateLookup[$templateKey] = $template->id;
+            }
+        }
+
+        $nextTemplateOrder = $templateOrderBase + count($answerTemplateLookup);
+
+        $resultRules = $payload['result_rules'] ?? [];
+        $resultRuleIdMap = [];
+
+        foreach ($resultRules as $index => $ruleData) {
+            if (!is_array($ruleData)) {
+                continue;
+            }
+
+            $ruleGroupId = $ruleData['rule_group_id'] ?? (string) Str::uuid();
+
+            $rule = $form->resultRules()->create([
+                'form_id' => $form->id,
+                'condition_type' => $ruleData['condition_type'] ?? 'range',
+                'min_score' => $ruleData['min_score'] ?? null,
+                'max_score' => $ruleData['max_score'] ?? null,
+                'single_score' => $ruleData['single_score'] ?? null,
+                'order' => $ruleOrderBase + $index,
+                'rule_group_id' => $ruleGroupId,
+            ]);
+
+            $resultRuleIdMap[$index] = $rule->id;
+
+            foreach ($ruleData['texts'] ?? [] as $textIndex => $text) {
+                $textValue = trim($text ?? '');
+                if ($textValue === '') {
+                    continue;
+                }
+
+                $rule->texts()->create([
+                    'result_text' => $textValue,
+                    'order' => $textIndex,
+                    'rule_group_id' => $ruleGroupId,
+                ]);
+            }
+        }
+
+        return [
+            'answer_template_id_map' => $answerTemplateIdMap,
+            'answer_template_lookup' => $answerTemplateLookup,
+            'next_template_order' => $nextTemplateOrder,
+            'result_rule_id_map' => $resultRuleIdMap,
+        ];
+    }
+
+    private function resetFormRules(Form $form): void
+    {
+        DB::table('result_rule_texts')
+            ->whereIn('result_rule_id', function ($query) use ($form) {
+                $query->select('id')
+                    ->from('result_rules')
+                    ->where('form_id', $form->id);
+            })
+            ->delete();
+
+        DB::table('result_settings')->where('form_id', $form->id)->delete();
+        DB::table('answer_templates')->where('form_id', $form->id)->delete();
+        DB::table('result_rules')->where('form_id', $form->id)->delete();
+    }
+
+    private function syncResultSettings(Form $form, array $payload, array $resultRuleIdMap): void
+    {
+        $resultSettings = $payload['result_settings'] ?? [];
+
+        foreach ($resultSettings as $index => $settingData) {
+            if (!is_array($settingData)) {
+                continue;
+            }
+
+            $resultRuleId = null;
+            if (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
+                $resultRuleId = $resultRuleIdMap[$settingData['result_rule_index']];
+            }
+
+            $resultText = $settingData['result_text'] ?? null;
+            if (!$resultText && $resultRuleId) {
+                $rule = $form->resultRules()->find($resultRuleId);
+                if ($rule && $rule->texts->isNotEmpty()) {
+                    $resultText = $rule->texts->first()->result_text;
+                }
+            }
+
+            $form->resultSettings()->create([
+                'form_id' => $form->id,
+                'result_rule_id' => $resultRuleId,
+                'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
+                'image_alignment' => $settingData['image_alignment'] ?? 'center',
+                'result_text' => $resultText,
+                'text_alignment' => $settingData['text_alignment'] ?? 'center',
+                'order' => $index,
+            ]);
+        }
+    }
+
+    private function normalizeRuleGroupId(array &$data): string
+    {
+        $ruleGroupId = $data['answer_templates'][0]['rule_group_id']
+            ?? $data['result_rules'][0]['rule_group_id']
+            ?? (string) Str::uuid();
+
+        $data['answer_templates'] = array_map(function ($template) use ($ruleGroupId) {
+            $template['rule_group_id'] = $template['rule_group_id'] ?? $ruleGroupId;
+            return $template;
+        }, $data['answer_templates'] ?? []);
+
+        $data['result_rules'] = array_map(function ($rule) use ($ruleGroupId) {
+            $rule['rule_group_id'] = $rule['rule_group_id'] ?? $ruleGroupId;
+            return $rule;
+        }, $data['result_rules'] ?? []);
+
+        return $ruleGroupId;
     }
 }
 

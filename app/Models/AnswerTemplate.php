@@ -13,6 +13,7 @@ class AnswerTemplate extends Model
         'answer_text',
         'score',
         'order',
+        'rule_group_id',
     ];
 
     protected $casts = [

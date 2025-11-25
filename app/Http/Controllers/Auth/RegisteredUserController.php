@@ -46,13 +46,8 @@ class RegisteredUserController extends Controller
 
         $existingUser = User::where('email', $request->email)->first();
 
-        if (! $existingUser) {
-            return back()
-                ->withInput(['email' => $request->email])
-                ->withErrors(['email' => __('Email tidak ditemukan. Silakan hubungi administrator.')]);
-        }
-
-        if (! $request->boolean('reset_mode')) {
+        // Jika user sudah ada dan belum dalam mode reset, tampilkan form reset password
+        if ($existingUser && ! $request->boolean('reset_mode')) {
             return redirect()
                 ->route('register')
                 ->withInput(['email' => $request->email, 'reset_mode' => 1])
@@ -60,14 +55,36 @@ class RegisteredUserController extends Controller
                 ->with('showReset', true);
         }
 
+        // Validasi untuk user baru (name hanya diperlukan untuk user baru)
+        if (! $existingUser) {
+            $request->validate([
+                'name' => ['required', 'string', 'max:255'],
+            ]);
+        }
+
+        // Validasi password untuk kedua kasus (user baru atau reset password)
         $request->validate([
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
-        $existingUser->forceFill([
-            'password' => Hash::make($request->password),
-        ])->save();
+        // Jika user sudah ada (mode reset password)
+        if ($existingUser) {
+            $existingUser->forceFill([
+                'password' => Hash::make($request->password),
+            ])->save();
 
-        return redirect()->route('login')->with('status', __('Password berhasil diperbarui. Silakan masuk.'));
+            return redirect()->route('login')->with('status', __('Password berhasil diperbarui. Silakan masuk.'));
+        }
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+        ]);
+
+        // Auto login setelah registrasi
+        auth()->login($user);
+
+        return redirect()->route('dashboard');
     }
 }

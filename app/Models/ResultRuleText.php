@@ -11,6 +11,7 @@ class ResultRuleText extends Model
         'result_rule_id',
         'result_text',
         'order',
+        'rule_group_id',
     ];
 
     // Relationships
