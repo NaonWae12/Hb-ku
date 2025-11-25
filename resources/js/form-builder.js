@@ -66,6 +66,64 @@ function resetFormRulesBuilder() {
     updateRuleSaveControlsVisibility();
 }
 
+function addResultSettingTextBlock(card, initialValue = '') {
+    const container = card.querySelector('.result-setting-texts');
+    if (!container) {
+        return null;
+    }
+
+    const block = document.createElement('div');
+    block.className = 'result-setting-text-block flex items-start space-x-2';
+    block.innerHTML = `
+        <textarea rows="4" class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none" placeholder="Tulis teks hasil di sini..."></textarea>
+        <button type="button" class="remove-result-text-btn p-2 text-gray-400 hover:text-red-600 transition-colors" title="Hapus teks">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        </button>
+    `;
+
+    const textarea = block.querySelector('.result-setting-text');
+    const removeBtn = block.querySelector('.remove-result-text-btn');
+    if (textarea) {
+        textarea.value = initialValue || '';
+    }
+
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            block.remove();
+            updateResultSettingTextBlocksState(container);
+        });
+    }
+
+    container.appendChild(block);
+    updateResultSettingTextBlocksState(container);
+    return textarea;
+}
+
+function updateResultSettingTextBlocksState(container) {
+    const blocks = container.querySelectorAll('.result-setting-text-block');
+    blocks.forEach((block, index) => {
+        const removeBtn = block.querySelector('.remove-result-text-btn');
+        if (removeBtn) {
+            removeBtn.hidden = blocks.length <= 1;
+        }
+    });
+}
+
+function setResultSettingTextValues(card, values = []) {
+    const container = card.querySelector('.result-setting-texts');
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+    if (!values.length) {
+        values = [''];
+    }
+    values.forEach((value) => addResultSettingTextBlock(card, value));
+}
+
 function enterRulesEditMode(rule) {
     editingRuleGroupId = rule?.rule_group_id || null;
     const saveBtn = document.getElementById('save-form-rules-btn');
@@ -963,12 +1021,26 @@ function createResultSettingCard() {
                 
                 <!-- Text Display Area -->
                 <div class="mt-4">
-                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Teks Hasil</label>
-                    <textarea 
-                        rows="4"
-                        class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
-                        placeholder="Teks hasil akan diambil dari aturan yang dipilih"
-                    ></textarea>
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Teks Hasil</label>
+                        <button type="button" class="add-result-setting-text-btn text-xs font-medium text-red-600 hover:text-red-700">
+                            + Tambah Teks
+                        </button>
+                    </div>
+                    <div class="result-setting-texts space-y-3">
+                        <div class="result-setting-text-block flex items-start space-x-2">
+                            <textarea 
+                                rows="4"
+                                class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
+                                placeholder="Teks hasil akan diambil dari aturan yang dipilih"
+                            ></textarea>
+                            <button type="button" class="remove-result-text-btn p-2 text-gray-400 hover:text-red-600 transition-colors hidden" title="Hapus teks">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Text Alignment -->
@@ -1010,27 +1082,59 @@ function attachResultSettingEvents(card) {
     const imageValueInput = card.querySelector('.result-setting-image-value');
     const imageSettings = card.querySelector('.result-setting-image-settings');
     const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
-    const textArea = card.querySelector('.result-setting-text');
     const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
     const deleteBtn = card.querySelector('.delete-result-setting-btn');
+    const addTextBtn = card.querySelector('.add-result-setting-text-btn');
+    const textBlocksContainer = card.querySelector('.result-setting-texts');
+
+    const getTextAreas = () => Array.from(card.querySelectorAll('.result-setting-texts .result-setting-text'));
+
+    const getRuleTextsFromSettings = () => {
+        const resultRulesContainer = document.getElementById('result-rules-container');
+        if (!resultRulesContainer) {
+            return [];
+        }
+        const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
+        const selectedIndex = parseInt(ruleSelect?.value ?? '-1', 10);
+        if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= ruleCards.length) {
+            return [];
+        }
+        const selectedRule = ruleCards[selectedIndex];
+        if (!selectedRule) {
+            return [];
+        }
+        return Array.from(selectedRule.querySelectorAll('.rule-result-text'))
+            .map((textarea) => textarea.value.trim())
+            .filter(Boolean);
+    };
+
+    const ensureDefaultTextBlock = () => {
+        if (!textBlocksContainer) {
+            return;
+        }
+        if (!textBlocksContainer.querySelector('.result-setting-text-block')) {
+            addResultSettingTextBlock(card);
+        } else {
+            updateResultSettingTextBlocksState(textBlocksContainer);
+        }
+    };
+
+    ensureDefaultTextBlock();
+
+    if (addTextBtn) {
+        addTextBtn.addEventListener('click', () => {
+            const textarea = addResultSettingTextBlock(card);
+            if (textarea) {
+                textarea.focus();
+            }
+        });
+    }
     
     // Update text from selected rule
     if (ruleSelect) {
         ruleSelect.addEventListener('change', function() {
-            const selectedIndex = parseInt(this.value);
-            if (!isNaN(selectedIndex)) {
-                const resultRulesContainer = document.getElementById('result-rules-container');
-                if (resultRulesContainer) {
-                    const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
-                    const selectedRule = ruleCards[selectedIndex];
-                    if (selectedRule && textArea) {
-                        const texts = Array.from(selectedRule.querySelectorAll('.rule-result-text'))
-                            .map(ta => ta.value.trim())
-                            .filter(t => t);
-                        textArea.value = texts.join('\n\n');
-                    }
-                }
-            }
+            const ruleTexts = getRuleTextsFromSettings();
+            setResultSettingTextValues(card, ruleTexts);
         });
     }
     
@@ -3268,6 +3372,25 @@ function attachQuestionCardEvents(card) {
             }
         });
     }
+
+    if (quickAddResultSettingBtn) {
+        quickAddResultSettingBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (!questionsContainer) {
+                return;
+            }
+            const resultSettingCard = createResultSettingCard();
+            attachResultSettingEvents(resultSettingCard);
+            if (card.nextSibling) {
+                questionsContainer.insertBefore(resultSettingCard, card.nextSibling);
+            } else {
+                questionsContainer.appendChild(resultSettingCard);
+            }
+            updateMainButtonsVisibility();
+            resultSettingCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    }
     
     // Quick add section button
     if (quickAddSectionBtn) {
@@ -3831,16 +3954,18 @@ function collectFormData() {
     const resultSettingCards = questionsContainer.querySelectorAll('.result-setting-card');
     resultSettingCards.forEach((card) => {
         const ruleSelect = card.querySelector('.result-setting-rule-select');
-        const textArea = card.querySelector('.result-setting-text');
         const imageValueInput = card.querySelector('.result-setting-image-value');
         const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
         const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
         
         const resultRuleIndex = ruleSelect ? parseInt(ruleSelect.value) : null;
-        const resultText = textArea ? textArea.value.trim() : null;
         const image = imageValueInput ? imageValueInput.value.trim() : null;
         const imageAlignment = alignmentSelect ? alignmentSelect.value : 'center';
         const textAlignment = textAlignmentSelect ? textAlignmentSelect.value : 'center';
+        const resultTexts = Array.from(card.querySelectorAll('.result-setting-texts .result-setting-text'))
+            .map((textarea) => textarea.value.trim())
+            .filter((text) => text !== '');
+        const resultText = resultTexts.length ? resultTexts.join('\n\n') : null;
         
         if (resultRuleIndex !== null && resultRuleIndex >= 0) {
             formData.result_settings.push({
@@ -4231,7 +4356,6 @@ function populateFormBuilder(data) {
                 
                 // Populate data
                 const ruleSelect = resultSettingCard.querySelector('.result-setting-rule-select');
-                const textArea = resultSettingCard.querySelector('.result-setting-text');
                 const imageValueInput = resultSettingCard.querySelector('.result-setting-image-value');
                 const imageArea = resultSettingCard.querySelector('.result-setting-image-area');
                 const resultImage = resultSettingCard.querySelector('.result-setting-image');
@@ -4268,8 +4392,11 @@ function populateFormBuilder(data) {
                     ruleSelect.dispatchEvent(new Event('change'));
                 }
                 
-                if (textArea && setting.result_text) {
-                    textArea.value = setting.result_text;
+                const savedTexts = setting.result_text
+                    ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
+                    : [];
+                if (savedTexts.length) {
+                    setResultSettingTextValues(resultSettingCard, savedTexts);
                 }
                 
                 if (textAlignmentSelect && setting.text_alignment) {
