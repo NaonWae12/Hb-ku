@@ -4,11 +4,11 @@
 
 @section('content')
 @php
-    $responsesStats = $responsesStats ?? [
-        'total_responses' => 0,
-        'question_count' => 0,
-        'latest_response_at' => null,
-    ];
+$responsesStats = $responsesStats ?? [
+'total_responses' => 0,
+'question_count' => 0,
+'latest_response_at' => null,
+];
 @endphp
 <div class="min-h-screen bg-gray-50" id="form-builder-root"
     data-initial='@json($formData ?? null)'
@@ -140,14 +140,14 @@
                         <p class="text-sm text-gray-500">Jawaban Terbaru</p>
                         <p id="builder-latest-response" class="text-xl font-semibold text-gray-900 mt-1">{{ $responsesStats['latest_response_at'] ?? 'Belum ada data' }}</p>
                         @if($formId)
-                            <a href="{{ route('forms.responses', $formId) }}" class="inline-flex items-center text-sm font-medium text-red-600 hover:text-red-700 mt-3">
-                                Lihat halaman jawaban lengkap
-                                <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                                </svg>
-                            </a>
+                        <a href="{{ route('forms.responses', $formId) }}" class="inline-flex items-center text-sm font-medium text-red-600 hover:text-red-700 mt-3">
+                            Lihat halaman jawaban lengkap
+                            <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </a>
                         @else
-                            <p class="text-xs text-gray-500 mt-2">Simpan form untuk mulai menerima jawaban.</p>
+                        <p class="text-xs text-gray-500 mt-2">Simpan form untuk mulai menerima jawaban.</p>
                         @endif
                     </div>
                 </div>
@@ -163,12 +163,12 @@
                             </button>
                         </div>
                         @if($shareUrl)
-                            <button id="builder-open-share" type="button" class="text-sm font-medium text-red-600 hover:text-red-700 flex items-center space-x-2" data-share-url="{{ $shareUrl }}">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 8a3 3 0 013 3v7a3 3 0 01-3 3H6a3 3 0 01-3-3v-7a3 3 0 013-3h9m4-3h-5m0 0V0m0 5l2.5-2.5" />
-                                </svg>
-                                <span>Bagikan Form</span>
-                            </button>
+                        <button id="builder-open-share" type="button" class="text-sm font-medium text-red-600 hover:text-red-700 flex items-center space-x-2" data-share-url="{{ $shareUrl }}">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 8a3 3 0 013 3v7a3 3 0 01-3 3H6a3 3 0 01-3-3v-7a3 3 0 013-3h9m4-3h-5m0 0V0m0 5l2.5-2.5" />
+                            </svg>
+                            <span>Bagikan Form</span>
+                        </button>
                         @endif
                     </div>
 
@@ -428,37 +428,37 @@
 
 @push('scripts')
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const summaryTab = document.getElementById('builder-summary-tab');
-    const individualTab = document.getElementById('builder-individual-tab');
-    const summaryPanel = document.getElementById('builder-summary-panel');
-    const individualPanel = document.getElementById('builder-individual-panel');
+    document.addEventListener('DOMContentLoaded', function() {
+        const summaryTab = document.getElementById('builder-summary-tab');
+        const individualTab = document.getElementById('builder-individual-tab');
+        const summaryPanel = document.getElementById('builder-summary-panel');
+        const individualPanel = document.getElementById('builder-individual-panel');
 
-    if (summaryTab && individualTab && summaryPanel && individualPanel) {
-        summaryTab.addEventListener('click', () => {
-            summaryTab.classList.add('text-red-600', 'border-red-600');
-            summaryTab.classList.remove('text-gray-500', 'border-transparent');
-            individualTab.classList.remove('text-red-600', 'border-red-600');
-            individualTab.classList.add('text-gray-500', 'border-transparent');
-            summaryPanel.classList.remove('hidden');
-            individualPanel.classList.add('hidden');
-        });
+        if (summaryTab && individualTab && summaryPanel && individualPanel) {
+            summaryTab.addEventListener('click', () => {
+                summaryTab.classList.add('text-red-600', 'border-red-600');
+                summaryTab.classList.remove('text-gray-500', 'border-transparent');
+                individualTab.classList.remove('text-red-600', 'border-red-600');
+                individualTab.classList.add('text-gray-500', 'border-transparent');
+                summaryPanel.classList.remove('hidden');
+                individualPanel.classList.add('hidden');
+            });
 
-        individualTab.addEventListener('click', () => {
-            individualTab.classList.add('text-red-600', 'border-red-600');
-            individualTab.classList.remove('text-gray-500', 'border-transparent');
-            summaryTab.classList.remove('text-red-600', 'border-red-600');
-            summaryTab.classList.add('text-gray-500', 'border-transparent');
-            individualPanel.classList.remove('hidden');
-            summaryPanel.classList.add('hidden');
-        });
-    }
+            individualTab.addEventListener('click', () => {
+                individualTab.classList.add('text-red-600', 'border-red-600');
+                individualTab.classList.remove('text-gray-500', 'border-transparent');
+                summaryTab.classList.remove('text-red-600', 'border-red-600');
+                summaryTab.classList.add('text-gray-500', 'border-transparent');
+                individualPanel.classList.remove('hidden');
+                summaryPanel.classList.add('hidden');
+            });
+        }
 
-    const summaryShareBtn = document.getElementById('builder-open-share');
-    const headerShareBtn = document.getElementById('share-link-btn');
-    if (summaryShareBtn && headerShareBtn) {
-        summaryShareBtn.addEventListener('click', () => headerShareBtn.click());
-    }
-});
+        const summaryShareBtn = document.getElementById('builder-open-share');
+        const headerShareBtn = document.getElementById('share-link-btn');
+        if (summaryShareBtn && headerShareBtn) {
+            summaryShareBtn.addEventListener('click', () => headerShareBtn.click());
+        }
+    });
 </script>
 @endpush
