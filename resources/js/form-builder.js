@@ -66,6 +66,31 @@ function resetFormRulesBuilder() {
     updateRuleSaveControlsVisibility();
 }
 
+function enterRulesEditMode(rule) {
+    editingRuleGroupId = rule?.rule_group_id || null;
+    const saveBtn = document.getElementById('save-form-rules-btn');
+    const cancelBtn = document.getElementById('cancel-form-rules-btn');
+    if (saveBtn) {
+        saveBtn.textContent = 'Update Aturan';
+        saveBtn.hidden = false;
+    }
+    if (cancelBtn) {
+        cancelBtn.hidden = false;
+    }
+}
+
+function exitRulesEditMode() {
+    editingRuleGroupId = null;
+    const saveBtn = document.getElementById('save-form-rules-btn');
+    const cancelBtn = document.getElementById('cancel-form-rules-btn');
+    if (saveBtn) {
+        saveBtn.textContent = defaultSaveRulesLabel;
+    }
+    if (cancelBtn) {
+        cancelBtn.hidden = true;
+    }
+}
+
 function ensureChartJsLoaded() {
     if (window.Chart) {
         return Promise.resolve();
@@ -1920,6 +1945,8 @@ function attachResultRuleEvents(ruleCard, container) {
 let savedRulesState = [];
 let sortableInstance = null;
 let sortableInitialized = false;
+let editingRuleGroupId = null;
+let defaultSaveRulesLabel = 'Simpan Aturan';
 
 function hasFormTemplates() {
     return document.querySelectorAll('.answer-template-card').length > 0;
@@ -2009,6 +2036,9 @@ function renderSavedRulesChips() {
         const chip = document.createElement('div');
         chip.className = 'saved-rule-chip inline-flex items-center space-x-2 px-3 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full';
         chip.setAttribute('data-rule-index', index);
+        if (rule.rule_group_id) {
+            chip.setAttribute('data-rule-group-id', rule.rule_group_id);
+        }
 
         const descriptionParts = [];
         if (templates.length) {
@@ -2045,6 +2075,7 @@ function renderSavedRulesChips() {
         if (editBtn) {
             editBtn.addEventListener('click', function () {
                 hydrateRuleBuilderFromPreset(rule);
+                enterRulesEditMode(rule);
             });
         }
 
@@ -2053,10 +2084,14 @@ function renderSavedRulesChips() {
             removeBtn.addEventListener('click', function () {
                 const indexToRemove = parseInt(chip.getAttribute('data-rule-index'), 10);
                 const current = loadSavedRules();
-                current.splice(indexToRemove, 1);
+                const removed = current.splice(indexToRemove, 1)[0];
                 saveRulesToState(current);
                 renderSavedRulesChips();
                 updateUseRuleButtonsVisibility();
+                if (removed && removed.rule_group_id && removed.rule_group_id === editingRuleGroupId) {
+                    exitRulesEditMode();
+                    resetFormRulesBuilder();
+                }
             });
         }
     });
@@ -2788,6 +2823,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     const saveRulesBtn = document.getElementById('save-form-rules-btn');
+    const cancelRulesBtn = document.getElementById('cancel-form-rules-btn');
+    defaultSaveRulesLabel = saveRulesBtn?.textContent?.trim() || defaultSaveRulesLabel;
+
+    if (cancelRulesBtn) {
+        cancelRulesBtn.addEventListener('click', () => {
+            exitRulesEditMode();
+            resetFormRulesBuilder();
+        });
+    }
+
+    exitRulesEditMode();
+
     if (saveRulesBtn) {
         saveRulesBtn.addEventListener('click', async function() {
             if (!formRulesSaveUrl) {
@@ -2819,6 +2866,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     body: JSON.stringify({
                         answer_templates: answerTemplatesPayload,
                         result_rules: resultRulesPayload,
+                        rule_group_id: editingRuleGroupId,
                     }),
                 });
 
@@ -2828,6 +2876,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 const bundle = data.bundle || {
+                    rule_group_id: data.rule_group_id || editingRuleGroupId,
                     templates: data.answer_templates || answerTemplatesPayload,
                     result_rules: data.result_rules || resultRulesPayload,
                 };
@@ -2839,18 +2888,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 const currentRules = loadSavedRules();
-                currentRules.push(normalizedRule);
+                if (editingRuleGroupId) {
+                    const existingIndex = currentRules.findIndex((rule) => rule.rule_group_id === editingRuleGroupId);
+                    if (existingIndex !== -1) {
+                        currentRules[existingIndex] = normalizedRule;
+                    } else {
+                        currentRules.push(normalizedRule);
+                    }
+                } else {
+                    currentRules.push(normalizedRule);
+                }
                 saveRulesToState(currentRules);
                 renderSavedRulesChips();
                 updateUseRuleButtonsVisibility();
                 resetFormRulesBuilder();
+                exitRulesEditMode();
                 showSuccessDialog(data.message || 'Aturan form berhasil disimpan.');
             } catch (error) {
                 console.error(error);
                 alert(error.message || 'Terjadi kesalahan saat menyimpan aturan.');
             } finally {
                 saveRulesBtn.disabled = false;
-                saveRulesBtn.textContent = 'Simpan Aturan';
+                saveRulesBtn.textContent = editingRuleGroupId ? 'Update Aturan' : defaultSaveRulesLabel;
             }
         });
     }

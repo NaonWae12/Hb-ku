@@ -331,9 +331,14 @@
 
                             <div class="mt-6 flex items-center justify-between">
                                 <p class="text-xs text-gray-500 max-w-md">Simpan aturan agar bisa dipakai ulang pada pertanyaan pilihan ganda.</p>
-                                <button id="save-form-rules-btn" hidden class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
-                                    Simpan Aturan
-                                </button>
+                                <div class="flex items-center space-x-3">
+                                    <button id="save-form-rules-btn" hidden class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
+                                        Simpan Aturan
+                                    </button>
+                                    <button id="cancel-form-rules-btn" hidden type="button" class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
+                                        Batal
+                                    </button>
+                                </div>
                             </div>
 
                             <div id="saved-rules-container" class="mt-4 space-y-2 hidden">

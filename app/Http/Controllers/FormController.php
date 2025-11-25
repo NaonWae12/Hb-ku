@@ -278,14 +278,26 @@ class FormController extends Controller
             'result_rules.*.rule_group_id' => ['nullable', 'string'],
             'result_rules.*.texts' => ['required', 'array', 'min:1'],
             'result_rules.*.texts.*' => ['required', 'string'],
+            'rule_group_id' => ['nullable', 'string'],
         ]);
 
-        $ruleGroupId = $this->normalizeRuleGroupId($data);
+        $preferredGroupId = $data['rule_group_id'] ?? null;
+        $ruleGroupId = $this->normalizeRuleGroupId($data, $preferredGroupId);
+        unset($data['rule_group_id']);
+
+        $templateOrderBase = null;
+        $ruleOrderBase = null;
+
+        if ($preferredGroupId) {
+            $deleteContext = $this->deleteRuleGroup($form, $ruleGroupId);
+            $templateOrderBase = $deleteContext['template_order_base'];
+            $ruleOrderBase = $deleteContext['rule_order_base'];
+        }
 
         try {
             DB::beginTransaction();
 
-            $this->persistFormRules($form, $data, true);
+            $this->persistFormRules($form, $data, true, $templateOrderBase, $ruleOrderBase);
 
             DB::commit();
         } catch (\Throwable $throwable) {
@@ -964,18 +976,33 @@ class FormController extends Controller
         })->filter()->values()->toArray();
     }
 
-    private function persistFormRules(Form $form, array $payload, bool $append = false): array
+    private function persistFormRules(
+        Form $form,
+        array $payload,
+        bool $append = false,
+        ?int $templateOrderOverride = null,
+        ?int $ruleOrderOverride = null
+    ): array
     {
         $answerTemplateIdMap = [];
         $answerTemplateLookup = [];
         $answerTemplates = $payload['answer_templates'] ?? [];
 
-        $templateOrderBase = $append
-            ? ((int) ($form->answerTemplates()->max('order') ?? -1) + 1)
-            : 0;
-        $ruleOrderBase = $append
-            ? ((int) ($form->resultRules()->max('order') ?? -1) + 1)
-            : 0;
+        if ($templateOrderOverride !== null) {
+            $templateOrderBase = $templateOrderOverride;
+        } elseif ($append) {
+            $templateOrderBase = ((int) ($form->answerTemplates()->max('order') ?? -1) + 1);
+        } else {
+            $templateOrderBase = 0;
+        }
+
+        if ($ruleOrderOverride !== null) {
+            $ruleOrderBase = $ruleOrderOverride;
+        } elseif ($append) {
+            $ruleOrderBase = ((int) ($form->resultRules()->max('order') ?? -1) + 1);
+        } else {
+            $ruleOrderBase = 0;
+        }
 
         foreach ($answerTemplates as $index => $templateData) {
             if (!is_array($templateData)) {
@@ -1065,6 +1092,41 @@ class FormController extends Controller
         DB::table('result_rules')->where('form_id', $form->id)->delete();
     }
 
+    private function deleteRuleGroup(Form $form, string $ruleGroupId): array
+    {
+        $templateQuery = $form->answerTemplates();
+        $templateQuery = $ruleGroupId === null
+            ? $templateQuery->whereNull('rule_group_id')
+            : $templateQuery->where('rule_group_id', $ruleGroupId);
+        $templateOrderBase = (clone $templateQuery)->min('order');
+
+        $rulesQuery = $form->resultRules();
+        $rulesQuery = $ruleGroupId === null
+            ? $rulesQuery->whereNull('rule_group_id')
+            : $rulesQuery->where('rule_group_id', $ruleGroupId);
+        $ruleOrderBase = (clone $rulesQuery)->min('order');
+        $ruleIds = (clone $rulesQuery)->pluck('id');
+
+        if ($ruleIds->isNotEmpty()) {
+            DB::table('result_rule_texts')
+                ->whereIn('result_rule_id', $ruleIds)
+                ->delete();
+
+            DB::table('result_settings')
+                ->whereIn('result_rule_id', $ruleIds)
+                ->delete();
+        }
+
+        $rulesQuery->delete();
+
+        $templateQuery->delete();
+
+        return [
+            'template_order_base' => $templateOrderBase,
+            'rule_order_base' => $ruleOrderBase,
+        ];
+    }
+
     private function syncResultSettings(Form $form, array $payload, array $resultRuleIdMap): void
     {
         $resultSettings = $payload['result_settings'] ?? [];
@@ -1099,9 +1161,10 @@ class FormController extends Controller
         }
     }
 
-    private function normalizeRuleGroupId(array &$data): string
+    private function normalizeRuleGroupId(array &$data, ?string $preferredGroupId = null): string
     {
-        $ruleGroupId = $data['answer_templates'][0]['rule_group_id']
+        $ruleGroupId = $preferredGroupId
+            ?? $data['answer_templates'][0]['rule_group_id']
             ?? $data['result_rules'][0]['rule_group_id']
             ?? (string) Str::uuid();
 
