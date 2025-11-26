@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ResultRuleText extends Model
 {
@@ -18,5 +19,10 @@ class ResultRuleText extends Model
     public function resultRule(): BelongsTo
     {
         return $this->belongsTo(ResultRule::class);
+    }
+
+    public function textSetting(): HasOne
+    {
+        return $this->hasOne(ResultTextSetting::class);
     }
 }

@@ -97,7 +97,7 @@ $responsesStats = $responsesStats ?? [
             </div>
 
             <!-- Questions Container -->
-            <div id="questions-container" class="space-y-4">
+            <div id="questions-container" class="space-y-4 relative">
                 <!-- Question akan ditambahkan di sini via JavaScript -->
             </div>
 
@@ -468,4 +468,11 @@ $responsesStats = $responsesStats ?? [
         }
     });
 </script>
+
+<!-- Floating Button: Tambah Setup Hasil -->
+<button id="floating-add-result-setting-btn" class="fixed bottom-6 right-6 z-50 hidden items-center justify-center w-14 h-14 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2" title="Tambahkan Setup Hasil">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+    </svg>
+</button>
 @endpush

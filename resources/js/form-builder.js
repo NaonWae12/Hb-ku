@@ -66,30 +66,226 @@ function resetFormRulesBuilder() {
     updateRuleSaveControlsVisibility();
 }
 
-function setResultSettingTextValues(card, values = []) {
+function setResultSettingTextValues(card, textData = []) {
     const display = card.querySelector('.result-setting-text-display');
     if (!display) {
         return;
     }
 
-    const sanitized = Array.isArray(values)
-        ? values.map(text => (text || '').trim()).filter(Boolean)
-        : [];
+    // textData should be array of objects: [{result_rule_text_id, result_text, title, image, image_url}]
+    const sanitized = Array.isArray(textData) ? textData.filter(item => item && item.result_text) : [];
 
     if (!sanitized.length) {
         display.innerHTML = '<p class="text-sm text-gray-400 italic">Pilih aturan untuk melihat teks hasil.</p>';
     } else {
-        // Display each text in a separate, clearly distinct container
+        // Display each text form in a separate container with title, image, and readOnly result_text
         display.innerHTML = sanitized
-            .map((text, index) => `
-                <div class="border border-gray-200 rounded-lg p-3 bg-white ${index > 0 ? 'mt-3' : ''}">
-                    <p class="whitespace-pre-wrap text-sm text-gray-700">${text}</p>
-                </div>
-            `)
+            .map((item, index) => {
+                const resultRuleTextId = item.result_rule_text_id || item.id || `text-${index}`;
+                const title = item.title || '';
+                const image = item.image || item.image_url || '';
+                const resultTextRaw = item.result_text ?? item.text ?? '';
+                const resultText = typeof resultTextRaw === 'string'
+                    ? resultTextRaw
+                    : extractResultTextValue(resultTextRaw);
+                
+                return `
+                    <div class="result-text-form border border-gray-200 rounded-lg p-4 bg-white ${index > 0 ? 'mt-4' : ''}" data-result-rule-text-id="${resultRuleTextId}">
+                        <!-- Title Input -->
+                        <div class="mb-3">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Judul (opsional)</label>
+                            <input type="text" class="result-text-form-title w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Masukkan judul" value="${title}">
+                        </div>
+                        
+                        <!-- Image Upload -->
+                        <div class="mb-3">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Gambar (opsional)</label>
+                            <div class="result-text-form-image-area ${image ? '' : 'hidden'} mb-2">
+                                <div class="relative inline-block">
+                                    <img src="${image}" alt="Text form image" class="result-text-form-image max-w-full h-auto rounded-lg border border-gray-200" style="max-height: 200px;">
+                                    <button type="button" class="remove-result-text-form-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <input type="file" accept="image/*" class="hidden result-text-form-image-file-input" data-result-rule-text-id="${resultRuleTextId}">
+                            <input type="hidden" class="result-text-form-image-value" data-result-rule-text-id="${resultRuleTextId}" value="${image}">
+                            <button type="button" class="add-result-text-form-image-btn px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                                ${image ? 'Ganti Gambar' : 'Tambahkan Gambar'}
+                            </button>
+                        </div>
+                        
+                        <!-- Result Text (ReadOnly) -->
+                        <div>
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Teks Hasil</label>
+                            <textarea readonly class="result-text-form-text w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-700 resize-none" rows="3">${resultText}</textarea>
+                        </div>
+                    </div>
+                `;
+            })
             .join('');
+        
+        // Attach events to image upload buttons
+        display.querySelectorAll('.add-result-text-form-image-btn').forEach(btn => {
+            const formContainer = btn.closest('.result-text-form');
+            const fileInput = formContainer.querySelector('.result-text-form-image-file-input');
+            const imageValueInput = formContainer.querySelector('.result-text-form-image-value');
+            const imageArea = formContainer.querySelector('.result-text-form-image-area');
+            const imageEl = formContainer.querySelector('.result-text-form-image');
+            const removeBtn = formContainer.querySelector('.remove-result-text-form-image-btn');
+            
+            if (fileInput && imageValueInput) {
+                btn.addEventListener('click', () => fileInput.click());
+                
+                fileInput.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const base64 = event.target.result;
+                        imageValueInput.value = base64;
+                        if (imageEl) imageEl.src = base64;
+                        if (imageArea) imageArea.classList.remove('hidden');
+                        btn.textContent = 'Ganti Gambar';
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+            
+            if (removeBtn && imageArea && imageValueInput && imageEl) {
+                removeBtn.addEventListener('click', function() {
+                    imageValueInput.value = '';
+                    imageEl.src = '';
+                    imageArea.classList.add('hidden');
+                    btn.textContent = 'Tambahkan Gambar';
+                });
+            }
+        });
     }
 
+    // Store data for form submission
     card.dataset.resultTexts = JSON.stringify(sanitized);
+}
+
+function extractResultTextValue(text) {
+    if (!text) {
+        return '';
+    }
+    if (typeof text === 'string') {
+        return text;
+    }
+    if (typeof text === 'object') {
+        if (typeof text.result_text === 'string') {
+            return text.result_text;
+        }
+        if (typeof text.text === 'string') {
+            return text.text;
+        }
+    }
+    return '';
+}
+
+function normalizeResultRuleTexts(texts) {
+    if (!Array.isArray(texts)) {
+        return [];
+    }
+    return texts
+        .map(extractResultTextValue)
+        .filter((value) => typeof value === 'string' && value.trim() !== '');
+}
+
+function cloneResultTextItems(items = []) {
+    const timestamp = Date.now();
+    return items
+        .map((item, index) => {
+            if (!item) {
+                return null;
+            }
+
+            if (typeof item === 'string') {
+                const text = item.trim();
+                if (!text) {
+                    return null;
+                }
+                return {
+                    result_rule_text_id: `lookup-${timestamp}-${index}`,
+                    result_text: text,
+                    title: null,
+                    image: null,
+                };
+            }
+
+            if (typeof item === 'object') {
+                const text = item.result_text || item.text || '';
+                if (!text || typeof text !== 'string' || text.trim() === '') {
+                    return null;
+                }
+
+                return {
+                    result_rule_text_id: item.result_rule_text_id
+                        || item.id
+                        || item.temp_id
+                        || `lookup-${timestamp}-${index}`,
+                    result_text: text,
+                    title: item.title || null,
+                    image: item.image || item.image_url || null,
+                };
+            }
+
+            return null;
+        })
+        .filter(Boolean);
+}
+
+function buildRuleGroupTextLookup(data) {
+    const lookup = {};
+    if (!data || !Array.isArray(data.result_rules)) {
+        return lookup;
+    }
+
+    data.result_rules.forEach((rule) => {
+        const groupId = rule.rule_group_id;
+        if (!groupId) {
+            return;
+        }
+
+        const texts = cloneResultTextItems(rule.texts || []);
+        if (!texts.length) {
+            return;
+        }
+
+        if (!lookup[groupId]) {
+            lookup[groupId] = [];
+        }
+
+        lookup[groupId] = texts;
+    });
+
+    return lookup;
+}
+
+function updateRuleGroupTextLookup(ruleGroupId, items = []) {
+    if (!ruleGroupId) {
+        return;
+    }
+
+    const clones = cloneResultTextItems(items);
+    if (!clones.length) {
+        return;
+    }
+
+    ruleGroupTextLookup[ruleGroupId] = clones;
+}
+
+function getRuleGroupTextFromLookup(ruleGroupId) {
+    if (!ruleGroupId || !ruleGroupTextLookup[ruleGroupId]) {
+        return [];
+    }
+
+    return cloneResultTextItems(ruleGroupTextLookup[ruleGroupId]);
 }
 
 function enterRulesEditMode(rule) {
@@ -665,7 +861,8 @@ function hydrateRuleBuilderFromPreset(preset) {
 
             const resultTextsContainer = ruleCard.querySelector('.rule-result-texts');
             const addTextBtn = ruleCard.querySelector('.add-result-text-btn');
-            const texts = Array.isArray(rule.texts) && rule.texts.length ? rule.texts : [''];
+            const normalizedTexts = normalizeResultRuleTexts(rule.texts);
+            const texts = normalizedTexts.length ? normalizedTexts : [''];
             texts.forEach((text, idx) => {
                 if (idx === 0) {
                     const textarea = resultTextsContainer?.querySelector('.rule-result-text');
@@ -920,7 +1117,7 @@ let resultSettingCounter = 0;
 function createResultSettingCard() {
     resultSettingCounter++;
     const card = document.createElement('div');
-    card.className = 'result-setting-card bg-white rounded-lg shadow-sm border-2 border-gray-200 p-6 my-6';
+    card.className = 'result-setting-card bg-white rounded-lg shadow-sm border-2 border-gray-200 p-6 my-6 transition-all';
     card.setAttribute('data-result-setting-id', resultSettingCounter);
     
     // Get result rules from settings tab and saved rules
@@ -1094,6 +1291,29 @@ function attachResultSettingEvents(card) {
     const textDisplay = card.querySelector('.result-setting-text-display');
     const deleteBtn = card.querySelector('.delete-result-setting-btn');
 
+    // Add outline on click (similar to question card)
+    card.addEventListener('click', function(e) {
+        const shouldSkipFocus = e.target.closest('button')
+            || e.target.closest('input')
+            || e.target.closest('textarea')
+            || e.target.closest('select')
+            || e.target.closest('.result-text-form');
+
+        if (shouldSkipFocus) {
+            return;
+        }
+
+        // Remove active from all result setting cards
+        document.querySelectorAll('.result-setting-card').forEach(c => {
+            c.classList.remove('ring-2', 'ring-red-600', 'border-red-600');
+            c.classList.add('border-gray-200');
+        });
+        
+        // Add active to this card
+        card.classList.add('ring-2', 'ring-red-600', 'border-red-600');
+        card.classList.remove('border-gray-200');
+    });
+
     const getRuleTextsFromSettings = () => {
         const selectedOption = ruleSelect?.selectedOptions[0];
         if (!selectedOption) {
@@ -1106,27 +1326,57 @@ function attachResultSettingEvents(card) {
         if (!ruleGroupId) {
             return [];
         }
+
+        const logResultTexts = (source, texts) => {
+            if (!Array.isArray(texts)) {
+                return;
+            }
+            console.log('[ResultSetting] Loaded texts', {
+                source,
+                ruleGroupId,
+                count: texts.length,
+                texts,
+            });
+        };
         
         // Get texts from active rules in settings tab
         if (ruleType === 'active') {
             const resultRulesContainer = document.getElementById('result-rules-container');
             if (!resultRulesContainer) {
-                return [];
+                const fallback = getRuleGroupTextFromLookup(ruleGroupId);
+                logResultTexts('active-no-container', fallback);
+                return fallback;
             }
             
             const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
             const matchingRules = ruleCards.filter(card => card.getAttribute('data-rule-group-id') === ruleGroupId);
             
-            // Collect all texts from all matching rules
+            // Collect all texts from all matching rules with temporary IDs
             const allTexts = [];
-            matchingRules.forEach(ruleCard => {
-                const texts = Array.from(ruleCard.querySelectorAll('.rule-result-text'))
-                    .map((textarea) => textarea.value.trim())
-                    .filter(Boolean);
-                allTexts.push(...texts);
+            matchingRules.forEach((ruleCard, ruleIndex) => {
+                const textareas = Array.from(ruleCard.querySelectorAll('.rule-result-text'));
+                textareas.forEach((textarea, textIndex) => {
+                    const text = textarea.value.trim();
+                    if (text) {
+                        allTexts.push({
+                            result_rule_text_id: `temp-${ruleGroupId}-${ruleIndex}-${textIndex}`, // Temporary ID for active rules
+                            result_text: text,
+                            title: null,
+                            image: null,
+                        });
+                    }
+                });
             });
             
-            return allTexts;
+            if (allTexts.length) {
+                updateRuleGroupTextLookup(ruleGroupId, allTexts);
+                logResultTexts('active-builder', allTexts);
+                return allTexts;
+            }
+
+            const fallback = getRuleGroupTextFromLookup(ruleGroupId);
+            logResultTexts('active-fallback', fallback);
+            return fallback;
         }
         
         // Get texts from saved rules
@@ -1142,17 +1392,47 @@ function attachResultSettingEvents(card) {
                 if (normalized.result_rules && Array.isArray(normalized.result_rules)) {
                     // Collect all texts from all result rules in this group
                     const allTexts = [];
-                    normalized.result_rules.forEach(rule => {
+                    normalized.result_rules.forEach((rule, ruleIndex) => {
                         if (Array.isArray(rule.texts)) {
-                            allTexts.push(...rule.texts.filter(Boolean));
+                            rule.texts.forEach((text, textIndex) => {
+                                const textValue = typeof text === 'string'
+                                    ? text
+                                    : (text && typeof text === 'object' ? (text.result_text || text.text || '') : '');
+                                if (textValue) {
+                                    allTexts.push({
+                                        result_rule_text_id: (text && typeof text === 'object' && text.id)
+                                            ? text.id
+                                            : (rule.text_ids && rule.text_ids[textIndex]
+                                                ? rule.text_ids[textIndex]
+                                                : `saved-${ruleGroupId}-${ruleIndex}-${textIndex}`),
+                                        result_text: textValue,
+                                        title: text && typeof text === 'object' ? (text.title || null) : null,
+                                        image: text && typeof text === 'object'
+                                            ? (text.image || text.image_url || null)
+                                            : null,
+                                    });
+                                }
+                            });
                         }
                     });
-                    return allTexts;
+                    if (allTexts.length) {
+                        updateRuleGroupTextLookup(ruleGroupId, allTexts);
+                        logResultTexts('saved-builder', allTexts);
+                        return allTexts;
+                    }
                 }
+            }
+
+            const fallbackSaved = getRuleGroupTextFromLookup(ruleGroupId);
+            if (fallbackSaved.length) {
+                logResultTexts('saved-fallback', fallbackSaved);
+                return fallbackSaved;
             }
         }
         
-        return [];
+        const fallback = getRuleGroupTextFromLookup(ruleGroupId);
+        logResultTexts('general-fallback', fallback);
+        return fallback;
     };
 
     const updateImageAlignment = () => {
@@ -2098,6 +2378,7 @@ function attachResultRuleEvents(ruleCard, container) {
 }
 
 let savedRulesState = [];
+let ruleGroupTextLookup = {};
 let sortableInstance = null;
 let sortableInitialized = false;
 let editingRuleGroupId = null;
@@ -2130,7 +2411,13 @@ function generateRuleGroupId() {
 
 function normalizeSavedRule(rule) {
     if (!rule) {
-        return { templates: [], result_rules: [], rule_group_id: generateRuleGroupId(), title: null };
+        return {
+            templates: [],
+            result_rules: [],
+            rule_group_id: generateRuleGroupId(),
+            title: null,
+            text_settings: [],
+        };
     }
 
     const normalized = {
@@ -2139,6 +2426,7 @@ function normalizeSavedRule(rule) {
         title: rule.title ?? rule.rule_group_title ?? null,
         templates: Array.isArray(rule.templates) ? rule.templates.slice() : Array.isArray(rule.answer_templates) ? rule.answer_templates.slice() : [],
         result_rules: Array.isArray(rule.result_rules) ? rule.result_rules.slice() : [],
+        text_settings: cloneResultTextItems(rule.text_settings || rule.result_text_settings || []),
     };
 
     if (!normalized.result_rules.length && rule.condition_type) {
@@ -2147,7 +2435,7 @@ function normalizeSavedRule(rule) {
             min_score: rule.min_score ?? null,
             max_score: rule.max_score ?? null,
             single_score: rule.single_score ?? null,
-            texts: Array.isArray(rule.texts) ? rule.texts.slice() : [],
+            texts: normalizeResultRuleTexts(rule.texts),
         });
     }
 
@@ -2896,6 +3184,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (initialAttr) {
             try {
                 initialData = JSON.parse(initialAttr);
+                ruleGroupTextLookup = buildRuleGroupTextLookup(initialData);
             } catch (error) {
                 console.error('Failed to parse initial form data:', error);
             }
@@ -3377,6 +3666,36 @@ function attachQuestionCardEvents(card) {
     const quickAddResultSettingBtn = card.querySelector('.quick-add-result-setting-btn');
     
     // Check if form has result rules
+    // Floating button for adding result setting
+    const floatingAddResultSettingBtn = document.getElementById('floating-add-result-setting-btn');
+    const updateFloatingButtonVisibility = () => {
+        if (floatingAddResultSettingBtn) {
+            if (hasResultRules()) {
+                floatingAddResultSettingBtn.classList.remove('hidden');
+                floatingAddResultSettingBtn.classList.add('flex');
+            } else {
+                floatingAddResultSettingBtn.classList.add('hidden');
+                floatingAddResultSettingBtn.classList.remove('flex');
+            }
+        }
+    };
+
+    if (floatingAddResultSettingBtn) {
+        floatingAddResultSettingBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (questionsContainer) {
+                const resultSettingCard = createResultSettingCard();
+                questionsContainer.appendChild(resultSettingCard);
+                attachResultSettingEvents(resultSettingCard);
+                updateMainButtonsVisibility();
+                
+                // Scroll to the new card
+                resultSettingCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    }
+
     const hasResultRules = () => {
         const resultRulesContainer = document.getElementById('result-rules-container');
         if (!resultRulesContainer) return false;
@@ -3400,6 +3719,8 @@ function attachQuestionCardEvents(card) {
                 }
             }
         }
+        // Update floating button visibility
+        updateFloatingButtonVisibility();
     };
     
     const hideQuickAddButtons = () => {
@@ -3800,7 +4121,8 @@ function collectFormData() {
         questions: [],
         answer_templates: [],
         result_rules: [],
-        result_settings: []
+        result_settings: [],
+        result_text_settings: [] // New structure for result text settings
     };
 
     // Collect sections
@@ -4008,33 +4330,50 @@ function collectFormData() {
         }
     });
     
-    // Collect result settings (always at the bottom)
+    // Collect result text settings (new structure)
     const resultSettingCards = questionsContainer.querySelectorAll('.result-setting-card');
     resultSettingCards.forEach((card) => {
         const ruleSelect = card.querySelector('.result-setting-rule-select');
-        // Title removed - now using title from rule_groups
-        const imageValueInput = card.querySelector('.result-setting-image-value');
-        const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
         const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
         
         const selectedOption = ruleSelect?.selectedOptions[0];
         const ruleGroupId = selectedOption ? selectedOption.getAttribute('data-rule-group-id') : null;
-        const image = imageValueInput ? imageValueInput.value.trim() : null;
-        const imageAlignment = alignmentSelect ? alignmentSelect.value : 'center';
         const textAlignment = textAlignmentSelect ? textAlignmentSelect.value : 'center';
-        const storedTexts = card.dataset.resultTexts ? JSON.parse(card.dataset.resultTexts) : [];
-        const resultTexts = Array.isArray(storedTexts) ? storedTexts.filter(Boolean) : [];
-        const resultText = resultTexts.length ? resultTexts.join('\n\n') : null;
         
         if (ruleGroupId) {
-            formData.result_settings.push({
-                rule_group_id: ruleGroupId, // Use rule_group_id instead of result_rule_index
-                title: null, // Title now comes from rule_groups
-                result_text: resultText,
-                image: image || null,
-                image_alignment: imageAlignment,
-                text_alignment: textAlignment,
+            // Collect result text forms (each with title, image, and result_text)
+            const resultTextForms = card.querySelectorAll('.result-text-form');
+            const textSettings = [];
+            
+            resultTextForms.forEach((form, index) => {
+                const resultRuleTextId = form.getAttribute('data-result-rule-text-id');
+                const titleInput = form.querySelector('.result-text-form-title');
+                const imageValueInput = form.querySelector('.result-text-form-image-value');
+                const resultTextTextarea = form.querySelector('.result-text-form-text');
+                
+                const title = titleInput ? titleInput.value.trim() : null;
+                const image = imageValueInput ? imageValueInput.value.trim() : null;
+                const resultText = resultTextTextarea ? resultTextTextarea.value.trim() : null;
+                
+                if (resultRuleTextId && resultText) {
+                    textSettings.push({
+                        result_rule_text_id: resultRuleTextId.startsWith('temp-') || resultRuleTextId.startsWith('saved-') ? null : resultRuleTextId, // Only send real IDs
+                        temp_id: resultRuleTextId.startsWith('temp-') || resultRuleTextId.startsWith('saved-') ? resultRuleTextId : null, // For mapping
+                        title: title || null,
+                        image: image || null,
+                        result_text: resultText,
+                        order: index,
+                    });
+                }
             });
+            
+            if (textSettings.length > 0) {
+                formData.result_text_settings.push({
+                    rule_group_id: ruleGroupId,
+                    text_alignment: textAlignment,
+                    text_settings: textSettings,
+                });
+            }
         }
     });
 
@@ -4362,17 +4701,18 @@ function populateFormBuilder(data) {
                 const texts = Array.isArray(rule.texts) && rule.texts.length ? rule.texts : [''];
 
                 texts.forEach((text, idx) => {
+                    const textValue = extractResultTextValue(text);
                     if (idx === 0) {
                         const textarea = resultTextsContainer.querySelector('.rule-result-text');
                         if (textarea) {
-                            textarea.value = text || '';
+                            textarea.value = textValue;
                         }
                     } else if (addResultTextBtn) {
                         addResultTextBtn.click();
                         const textareas = resultTextsContainer.querySelectorAll('.rule-result-text');
                         const textarea = textareas[textareas.length - 1];
                         if (textarea) {
-                            textarea.value = text || '';
+                            textarea.value = textValue;
                         }
                     }
                 });
@@ -4446,19 +4786,26 @@ function populateFormBuilder(data) {
                         ruleSelect.value = matchingOption.value;
                         // Trigger change event to load texts from rules (will get all texts from all rules in group)
                         ruleSelect.dispatchEvent(new Event('change'));
-                    } else {
-                        // If option not found, use saved texts from database as fallback
-                        const savedTexts = setting.result_text
-                            ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
-                            : [];
-                        setResultSettingTextValues(resultSettingCard, savedTexts);
                     }
+                }
+                
+                // Apply saved text settings (title, image per text) if available
+                if (Array.isArray(setting.text_settings) && setting.text_settings.length) {
+                    updateRuleGroupTextLookup(ruleGroupId, setting.text_settings);
+                    setResultSettingTextValues(resultSettingCard, setting.text_settings);
                 } else {
-                    // If no rule_group_id, use saved texts from database
-                    const savedTexts = setting.result_text
-                        ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
-                        : [];
-                    setResultSettingTextValues(resultSettingCard, savedTexts);
+                    // Fallback: use saved result_text (legacy format)
+                const savedTexts = setting.result_text
+                    ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
+                    : [];
+                const fallbackTextObjects = savedTexts.map((text, index) => ({
+                    result_rule_text_id: `legacy-${ruleGroupId || 'unknown'}-${index}`,
+                    result_text: text,
+                    title: null,
+                    image: null,
+                }));
+                updateRuleGroupTextLookup(ruleGroupId, fallbackTextObjects);
+                setResultSettingTextValues(resultSettingCard, fallbackTextObjects);
                 }
                 
                 // Title removed - now using title from rule_groups
@@ -4470,27 +4817,8 @@ function populateFormBuilder(data) {
                     textAlignmentSelect.dispatchEvent(new Event('change'));
                 }
                 
-                if (setting.image) {
-                    const imageUrl = setting.image_url || setting.image;
-                    if (imageValueInput) {
-                        imageValueInput.value = imageUrl;
-                    }
-                    if (resultImage) {
-                        resultImage.src = imageUrl;
-                    }
-                    if (imageArea) {
-                        imageArea.classList.remove('hidden');
-                    }
-                    if (imageSettings) {
-                        imageSettings.classList.remove('hidden');
-                    }
-                    if (alignmentSelect) {
-                        if (setting.image_alignment) {
-                            alignmentSelect.value = setting.image_alignment;
-                        }
-                        alignmentSelect.dispatchEvent(new Event('change'));
-                    }
-                }
+                // Pada halaman ini, gambar hanya bisa diunggah manual (tidak auto-fetch dari server).
+                // Jadi kita biarkan preview kosong meskipun backend punya path gambar.
             });
             
             updateSectionNumbers();

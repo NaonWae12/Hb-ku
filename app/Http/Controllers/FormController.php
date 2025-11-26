@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Form;
 use App\Models\FormResponse;
+use App\Models\ResultTextSetting;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -162,7 +163,7 @@ class FormController extends Controller
             'resultRules' => function ($query) use ($form) {
                 $query->where('form_id', $form->id)
                     ->with(['texts' => function ($textQuery) {
-                        $textQuery->orderBy('order');
+                        $textQuery->orderBy('order')->with('textSetting');
                     }])->orderBy('order');
             },
             'resultSettings' => function ($query) {
@@ -816,6 +817,7 @@ class FormController extends Controller
         }
 
         $this->syncResultSettings($form, $payload, $resultRuleIdMap);
+        $this->syncResultTextSettings($form, $payload, $resultRuleIdMap);
     }
 
     /**
@@ -891,31 +893,70 @@ class FormController extends Controller
                 return $questionData;
             })->toArray();
 
-        $resultRulesData = $form->resultRules
-            ->sortBy('order')
-            ->values()
+        $resultRulesCollection = $form->resultRules()
+            ->with(['texts' => function ($textQuery) {
+                $textQuery->orderBy('order')->with('textSetting');
+            }])
+            ->orderBy('order')
+            ->get();
+
+        $resultRulesData = $resultRulesCollection
             ->map(function ($rule) {
+                // Get texts with their settings (title, image)
+                $textsWithSettings = $rule->texts
+                    ->sortBy('order')
+                    ->map(function ($text) {
+                        $textSetting = $text->textSetting;
+                        return [
+                            'id' => $text->id,
+                            'result_text' => $text->result_text,
+                            'title' => $textSetting ? $textSetting->title : null,
+                            'image' => $textSetting ? $textSetting->image : null,
+                            'image_url' => $textSetting && $textSetting->image ? asset($textSetting->image) : null,
+                        ];
+                    })
+                    ->toArray();
+
                 return [
+                    'id' => $rule->id,
                     'condition_type' => $rule->condition_type,
                     'min_score' => $rule->min_score,
                     'max_score' => $rule->max_score,
                     'single_score' => $rule->single_score,
                     'rule_group_id' => $rule->rule_group_id,
-                    'texts' => $rule->texts
-                        ->sortBy('order')
-                        ->pluck('result_text')
-                        ->toArray(),
+                    'texts' => $textsWithSettings,
                 ];
-            })->toArray();
+            })
+            ->values()
+            ->toArray();
+
+        $ruleGroupTextSettings = $resultRulesCollection
+            ->groupBy('rule_group_id')
+            ->map(function ($rules) {
+                return $rules->flatMap(function ($rule) {
+                    return $rule->texts
+                        ->sortBy('order')
+                        ->map(function ($text) {
+                            $textSetting = $text->textSetting;
+                            return [
+                                'result_rule_text_id' => $text->id,
+                                'result_text' => $text->result_text,
+                                'title' => $textSetting ? $textSetting->title : null,
+                                'image' => $textSetting ? $textSetting->image : null,
+                                'image_url' => $textSetting && $textSetting->image ? asset($textSetting->image) : null,
+                            ];
+                        });
+                })->values()->toArray();
+            });
 
         $resultSettingsData = $form->resultSettings
             ->sortBy('order')
             ->values()
-            ->map(function ($setting) {
+            ->map(function ($setting) use ($resultRulesCollection, $ruleGroupTextSettings) {
                 // Get rule_group_id from result_rule
                 $ruleGroupId = null;
                 if ($setting->result_rule_id) {
-                    $rule = $form->resultRules()->find($setting->result_rule_id);
+                    $rule = $resultRulesCollection->firstWhere('id', $setting->result_rule_id);
                     if ($rule) {
                         $ruleGroupId = $rule->rule_group_id;
                     }
@@ -930,6 +971,9 @@ class FormController extends Controller
                     'result_text' => $setting->result_text,
                     'text_alignment' => $setting->text_alignment ?? 'center',
                     'image_url' => $setting->image ? asset($setting->image) : null,
+                    'text_settings' => $ruleGroupId
+                        ? ($ruleGroupTextSettings->get($ruleGroupId) ?? [])
+                        : [],
                 ];
             })->toArray();
 
@@ -965,6 +1009,7 @@ class FormController extends Controller
             'result_rules' => $resultRulesData,
             'result_settings' => $resultSettingsData,
             'rule_groups' => $ruleGroupsData, // Add rule_groups for frontend
+            'result_text_settings' => [], // Deprecated, but kept for backward compatibility
         ];
     }
 
@@ -1257,6 +1302,75 @@ class FormController extends Controller
                 'text_alignment' => $settingData['text_alignment'] ?? 'center',
                 'order' => $index,
             ]);
+        }
+    }
+
+    /**
+     * Sync result text settings (new structure with title and image per text)
+     */
+    private function syncResultTextSettings(Form $form, array $payload, array $resultRuleIdMap): void
+    {
+        $resultTextSettings = $payload['result_text_settings'] ?? [];
+
+        // Delete existing result text settings for this form
+        $ruleGroupIds = collect($resultTextSettings)->pluck('rule_group_id')->filter()->unique();
+        if ($ruleGroupIds->isNotEmpty()) {
+            // Get all result_rule_text_ids from these rule groups
+            $resultRuleTextIds = $form->resultRules()
+                ->whereIn('rule_group_id', $ruleGroupIds)
+                ->with('texts')
+                ->get()
+                ->flatMap(function ($rule) {
+                    return $rule->texts->pluck('id');
+                })
+                ->toArray();
+
+            if (!empty($resultRuleTextIds)) {
+                ResultTextSetting::whereIn('result_rule_text_id', $resultRuleTextIds)->delete();
+            }
+        }
+
+        foreach ($resultTextSettings as $settingData) {
+            if (!is_array($settingData)) {
+                continue;
+            }
+
+            $ruleGroupId = $settingData['rule_group_id'] ?? null;
+            if (!$ruleGroupId) {
+                continue;
+            }
+
+            // Get all result_rule_texts for this rule_group_id
+            $resultRules = $form->resultRules()
+                ->where('rule_group_id', $ruleGroupId)
+                ->with('texts')
+                ->get();
+
+            // Create a map of temp_id or order to result_rule_text_id
+            $textSettings = $settingData['text_settings'] ?? [];
+
+            foreach ($resultRules as $rule) {
+                foreach ($rule->texts as $textIndex => $text) {
+                    // Try to match by order (since temp_id might not match exactly)
+                    $matchedSetting = null;
+                    foreach ($textSettings as $ts) {
+                        $tsOrder = $ts['order'] ?? 0;
+                        if ($tsOrder == $textIndex) {
+                            $matchedSetting = $ts;
+                            break;
+                        }
+                    }
+
+                    if ($matchedSetting) {
+                        ResultTextSetting::create([
+                            'result_rule_text_id' => $text->id,
+                            'title' => $matchedSetting['title'] ?? null,
+                            'image' => $this->processQuestionImage($matchedSetting['image'] ?? null, $form),
+                            'order' => $matchedSetting['order'] ?? $text->order ?? 0,
+                        ]);
+                    }
+                }
+            }
         }
     }
 
