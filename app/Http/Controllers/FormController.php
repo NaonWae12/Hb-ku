@@ -279,6 +279,7 @@ class FormController extends Controller
             'result_rules.*.texts' => ['required', 'array', 'min:1'],
             'result_rules.*.texts.*' => ['required', 'string'],
             'rule_group_id' => ['nullable', 'string'],
+            'rule_group_title' => ['nullable', 'string', 'max:255'],
         ]);
 
         $preferredGroupId = $data['rule_group_id'] ?? null;
@@ -297,7 +298,16 @@ class FormController extends Controller
         try {
             DB::beginTransaction();
 
-            $this->persistFormRules($form, $data, true, $templateOrderBase, $ruleOrderBase);
+            $this->persistFormRules($form, $data, true, $templateOrderBase, $ruleOrderBase, $ruleGroupId);
+            
+            // Save or update rule group title
+            $ruleGroupTitle = $data['rule_group_title'] ?? null;
+            if ($ruleGroupId) {
+                $form->ruleGroups()->updateOrCreate(
+                    ['rule_group_id' => $ruleGroupId],
+                    ['title' => $ruleGroupTitle]
+                );
+            }
 
             DB::commit();
         } catch (\Throwable $throwable) {
@@ -343,12 +353,17 @@ class FormController extends Controller
             })
             ->values();
 
+        // Get rule group title
+        $ruleGroup = $form->ruleGroups()->where('rule_group_id', $ruleGroupId)->first();
+        $ruleGroupTitle = $ruleGroup ? $ruleGroup->title : null;
+
         return response()->json([
             'success' => true,
             'message' => 'Aturan form berhasil disimpan.',
             'rule_group_id' => $ruleGroupId,
             'bundle' => [
                 'rule_group_id' => $ruleGroupId,
+                'title' => $ruleGroupTitle,
                 'templates' => $templatesBundle,
                 'result_rules' => $resultRulesBundle,
             ],
@@ -897,8 +912,19 @@ class FormController extends Controller
             ->sortBy('order')
             ->values()
             ->map(function ($setting) {
+                // Get rule_group_id from result_rule
+                $ruleGroupId = null;
+                if ($setting->result_rule_id) {
+                    $rule = $form->resultRules()->find($setting->result_rule_id);
+                    if ($rule) {
+                        $ruleGroupId = $rule->rule_group_id;
+                    }
+                }
+                
                 return [
                     'result_rule_id' => $setting->result_rule_id,
+                    'rule_group_id' => $ruleGroupId, // Add rule_group_id for frontend
+                    'title' => $setting->title,
                     'image' => $setting->image,
                     'image_alignment' => $setting->image_alignment ?? 'center',
                     'result_text' => $setting->result_text,
@@ -906,6 +932,21 @@ class FormController extends Controller
                     'image_url' => $setting->image ? asset($setting->image) : null,
                 ];
             })->toArray();
+
+        // Get rule_groups data for frontend
+        $ruleGroupsData = $form->ruleGroups()
+            ->get()
+            ->map(function ($ruleGroup) {
+                return [
+                    'rule_group_id' => $ruleGroup->rule_group_id,
+                    'title' => $ruleGroup->title,
+                ];
+            })
+            ->keyBy('rule_group_id')
+            ->map(function ($item) {
+                return $item['title'];
+            })
+            ->toArray();
 
         return [
             'id' => $form->id,
@@ -923,6 +964,7 @@ class FormController extends Controller
             'answer_templates' => $answerTemplatesData,
             'result_rules' => $resultRulesData,
             'result_settings' => $resultSettingsData,
+            'rule_groups' => $ruleGroupsData, // Add rule_groups for frontend
         ];
     }
 
@@ -942,7 +984,12 @@ class FormController extends Controller
             ->merge($rulesByGroup->keys())
             ->unique();
 
-        return $groupIds->map(function ($groupId) use ($templatesByGroup, $rulesByGroup) {
+        // Get all rule groups with titles
+        $ruleGroups = $form->ruleGroups()
+            ->whereIn('rule_group_id', $groupIds->filter(fn($id) => $id !== 'default'))
+            ->pluck('title', 'rule_group_id');
+
+        return $groupIds->map(function ($groupId) use ($templatesByGroup, $rulesByGroup, $ruleGroups) {
             $templates = $templatesByGroup->get($groupId, collect())->map(function ($template) {
                 return [
                     'id' => $template->id,
@@ -968,8 +1015,11 @@ class FormController extends Controller
                 return null;
             }
 
+            $title = $groupId !== 'default' ? ($ruleGroups[$groupId] ?? null) : null;
+
             return [
                 'rule_group_id' => $groupId === 'default' ? null : $groupId,
+                'title' => $title,
                 'templates' => $templates,
                 'result_rules' => $rules,
             ];
@@ -1090,6 +1140,7 @@ class FormController extends Controller
         DB::table('result_settings')->where('form_id', $form->id)->delete();
         DB::table('answer_templates')->where('form_id', $form->id)->delete();
         DB::table('result_rules')->where('form_id', $form->id)->delete();
+        DB::table('rule_groups')->where('form_id', $form->id)->delete();
     }
 
     private function deleteRuleGroup(Form $form, string $ruleGroupId): array
@@ -1137,7 +1188,20 @@ class FormController extends Controller
             }
 
             $resultRuleId = null;
-            if (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
+            
+            // Handle both old format (result_rule_index) and new format (rule_group_id)
+            if (isset($settingData['rule_group_id'])) {
+                // New format: get first result_rule_id from rule_group_id
+                $ruleGroupId = $settingData['rule_group_id'];
+                $firstRule = $form->resultRules()
+                    ->where('rule_group_id', $ruleGroupId)
+                    ->orderBy('order')
+                    ->first();
+                if ($firstRule) {
+                    $resultRuleId = $firstRule->id;
+                }
+            } elseif (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
+                // Old format: use result_rule_index
                 $resultRuleId = $resultRuleIdMap[$settingData['result_rule_index']];
             }
 
@@ -1148,10 +1212,45 @@ class FormController extends Controller
                     $resultText = $rule->texts->first()->result_text;
                 }
             }
+            
+            // If no resultText and we have rule_group_id, collect all texts from all rules in the group
+            if (!$resultText && isset($settingData['rule_group_id'])) {
+                $ruleGroupId = $settingData['rule_group_id'];
+                $rules = $form->resultRules()
+                    ->where('rule_group_id', $ruleGroupId)
+                    ->with('texts')
+                    ->get();
+                
+                $allTexts = [];
+                foreach ($rules as $rule) {
+                    foreach ($rule->texts as $text) {
+                        if ($text->result_text) {
+                            $allTexts[] = $text->result_text;
+                        }
+                    }
+                }
+                if (!empty($allTexts)) {
+                    $resultText = implode("\n\n", $allTexts);
+                }
+            }
+
+            // Get title from rule_groups
+            $title = null;
+            if (isset($settingData['rule_group_id'])) {
+                $ruleGroup = $form->ruleGroups()->where('rule_group_id', $settingData['rule_group_id'])->first();
+                $title = $ruleGroup ? $ruleGroup->title : null;
+            } elseif ($resultRuleId) {
+                $rule = $form->resultRules()->find($resultRuleId);
+                if ($rule && $rule->rule_group_id) {
+                    $ruleGroup = $form->ruleGroups()->where('rule_group_id', $rule->rule_group_id)->first();
+                    $title = $ruleGroup ? $ruleGroup->title : null;
+                }
+            }
 
             $form->resultSettings()->create([
                 'form_id' => $form->id,
                 'result_rule_id' => $resultRuleId,
+                'title' => $title, // Get from rule_groups, not from input
                 'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
                 'image_alignment' => $settingData['image_alignment'] ?? 'center',
                 'result_text' => $resultText,

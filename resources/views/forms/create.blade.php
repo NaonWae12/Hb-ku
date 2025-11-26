@@ -294,6 +294,13 @@ $responsesStats = $responsesStats ?? [
                     <h3 class="text-lg font-semibold text-gray-900 mb-4">Aturan Form</h3>
 
                     <div class="space-y-6">
+                        <!-- Title Input untuk Aturan -->
+                        <div>
+                            <label class="text-sm font-medium text-gray-900 mb-2 block">Judul Aturan</label>
+                            <input type="text" id="rule-group-title-input" placeholder="Contoh: Aturan Penilaian Kinerja" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-red-600 focus:ring-1 focus:ring-red-600 outline-none">
+                            <p class="text-xs text-gray-500 mt-1">Judul ini akan membantu Anda memilih aturan saat setup hasil di halaman pertanyaan</p>
+                        </div>
+
                         <!-- Template Jawaban dengan Skor -->
                         <div>
                             <div class="flex items-center justify-between mb-3">

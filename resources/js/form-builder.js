@@ -66,62 +66,30 @@ function resetFormRulesBuilder() {
     updateRuleSaveControlsVisibility();
 }
 
-function addResultSettingTextBlock(card, initialValue = '') {
-    const container = card.querySelector('.result-setting-texts');
-    if (!container) {
-        return null;
-    }
-
-    const block = document.createElement('div');
-    block.className = 'result-setting-text-block flex items-start space-x-2';
-    block.innerHTML = `
-        <textarea rows="4" class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none" placeholder="Tulis teks hasil di sini..."></textarea>
-        <button type="button" class="remove-result-text-btn p-2 text-gray-400 hover:text-red-600 transition-colors" title="Hapus teks">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-            </svg>
-        </button>
-    `;
-
-    const textarea = block.querySelector('.result-setting-text');
-    const removeBtn = block.querySelector('.remove-result-text-btn');
-    if (textarea) {
-        textarea.value = initialValue || '';
-    }
-
-    if (removeBtn) {
-        removeBtn.addEventListener('click', () => {
-            block.remove();
-            updateResultSettingTextBlocksState(container);
-        });
-    }
-
-    container.appendChild(block);
-    updateResultSettingTextBlocksState(container);
-    return textarea;
-}
-
-function updateResultSettingTextBlocksState(container) {
-    const blocks = container.querySelectorAll('.result-setting-text-block');
-    blocks.forEach((block, index) => {
-        const removeBtn = block.querySelector('.remove-result-text-btn');
-        if (removeBtn) {
-            removeBtn.hidden = blocks.length <= 1;
-        }
-    });
-}
-
 function setResultSettingTextValues(card, values = []) {
-    const container = card.querySelector('.result-setting-texts');
-    if (!container) {
+    const display = card.querySelector('.result-setting-text-display');
+    if (!display) {
         return;
     }
 
-    container.innerHTML = '';
-    if (!values.length) {
-        values = [''];
+    const sanitized = Array.isArray(values)
+        ? values.map(text => (text || '').trim()).filter(Boolean)
+        : [];
+
+    if (!sanitized.length) {
+        display.innerHTML = '<p class="text-sm text-gray-400 italic">Pilih aturan untuk melihat teks hasil.</p>';
+    } else {
+        // Display each text in a separate, clearly distinct container
+        display.innerHTML = sanitized
+            .map((text, index) => `
+                <div class="border border-gray-200 rounded-lg p-3 bg-white ${index > 0 ? 'mt-3' : ''}">
+                    <p class="whitespace-pre-wrap text-sm text-gray-700">${text}</p>
+                </div>
+            `)
+            .join('');
     }
-    values.forEach((value) => addResultSettingTextBlock(card, value));
+
+    card.dataset.resultTexts = JSON.stringify(sanitized);
 }
 
 function enterRulesEditMode(rule) {
@@ -640,6 +608,11 @@ function setQuestionOptions(card, questionType, options) {
 }
 
 function hydrateRuleBuilderFromPreset(preset) {
+    // Load title to input
+    const titleInput = document.getElementById('rule-group-title-input');
+    if (titleInput && preset) {
+        titleInput.value = preset.title || preset.rule_group_title || '';
+    }
     const normalized = normalizeSavedRule(preset);
     const answerTemplatesContainer = document.getElementById('answer-templates-container');
     const resultRulesContainer = document.getElementById('result-rules-container');
@@ -950,44 +923,95 @@ function createResultSettingCard() {
     card.className = 'result-setting-card bg-white rounded-lg shadow-sm border-2 border-gray-200 p-6 my-6';
     card.setAttribute('data-result-setting-id', resultSettingCounter);
     
-    // Get result rules from settings tab
+    // Get result rules from settings tab and saved rules
     const resultRulesContainer = document.getElementById('result-rules-container');
     const resultRules = resultRulesContainer ? Array.from(resultRulesContainer.querySelectorAll('.result-rule-card')) : [];
+    const savedRules = loadSavedRules();
     
-    // Get result rule options
-    const resultRuleOptions = resultRules.map((ruleCard, index) => {
-        const conditionType = ruleCard.querySelector('.rule-condition-type')?.value || 'range';
-        const texts = Array.from(ruleCard.querySelectorAll('.rule-result-text')).map(ta => ta.value.trim()).filter(t => t);
-        const firstText = texts[0] || '';
-        
-        let label = '';
-        if (conditionType === 'range') {
-            const min = ruleCard.querySelector('.rule-min-score')?.value || '';
-            const max = ruleCard.querySelector('.rule-max-score')?.value || '';
-            label = `Range ${min}-${max}`;
-        } else {
-            const single = ruleCard.querySelector('.rule-single-score')?.value || '';
-            label = `${conditionType} ${single}`;
+    // Get rule_groups data from form data (if available)
+    const rootElement = document.getElementById('form-builder-root');
+    const initialDataAttr = rootElement?.getAttribute('data-initial');
+    let ruleGroupsData = {};
+    if (initialDataAttr) {
+        try {
+            const initialData = JSON.parse(initialDataAttr);
+            ruleGroupsData = initialData.rule_groups || {};
+        } catch (e) {
+            console.warn('Failed to parse initial data:', e);
         }
-        
-        return `<option value="${index}">${label}${firstText ? ' - ' + firstText.substring(0, 30) : ''}</option>`;
-    }).join('');
+    }
+    
+    // Group active rules by rule_group_id and get unique titles
+    const activeRuleGroups = new Map();
+    resultRules.forEach((ruleCard) => {
+        const ruleGroupId = ruleCard.getAttribute('data-rule-group-id');
+        if (ruleGroupId && !activeRuleGroups.has(ruleGroupId)) {
+            // Try to get title from rule_groups data first
+            let title = ruleGroupsData[ruleGroupId] || null;
+            
+            // If not found, try from saved rules
+            if (!title) {
+                const matchingRule = savedRules.find(r => {
+                    const normalized = normalizeSavedRule(r);
+                    return normalized.rule_group_id === ruleGroupId;
+                });
+                if (matchingRule) {
+                    title = normalizeSavedRule(matchingRule).title;
+                }
+            }
+            
+            // If still not found, try to get from rule-group-title-input (for new rules being edited)
+            if (!title) {
+                const titleInput = document.getElementById('rule-group-title-input');
+                if (titleInput && titleInput.value.trim()) {
+                    title = titleInput.value.trim();
+                }
+            }
+            
+            activeRuleGroups.set(ruleGroupId, title || `Aturan ${activeRuleGroups.size + 1}`);
+        }
+    });
+    
+    // Build options from active rule groups (only title, no duplicates)
+    let resultRuleOptions = '';
+    activeRuleGroups.forEach((title, ruleGroupId) => {
+        resultRuleOptions += `<option value="active-${ruleGroupId}" data-rule-type="active" data-rule-group-id="${ruleGroupId}">${title}</option>`;
+    });
+    
+    // Add saved rules options (only title, grouped by rule_group_id)
+    const savedRuleGroups = new Map();
+    savedRules.forEach((savedRule) => {
+        const normalized = normalizeSavedRule(savedRule);
+        if (normalized.rule_group_id && !savedRuleGroups.has(normalized.rule_group_id)) {
+            const ruleTitle = normalized.title || `Aturan Tersimpan ${savedRuleGroups.size + 1}`;
+            savedRuleGroups.set(normalized.rule_group_id, ruleTitle);
+        }
+    });
+    
+    savedRuleGroups.forEach((title, ruleGroupId) => {
+        // Skip if already in active rule groups
+        if (!activeRuleGroups.has(ruleGroupId)) {
+            resultRuleOptions += `<option value="saved-${ruleGroupId}" data-rule-type="saved" data-rule-group-id="${ruleGroupId}">${title}</option>`;
+        }
+    });
     
     card.innerHTML = `
         <div class="flex items-start justify-between">
             <div class="flex-1">
-                <div class="flex items-center space-x-3 mb-4">
-                    <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center shrink-0">
-                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <div class="flex-1">
-                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Pilih Aturan Hasil</label>
-                        <select class="result-setting-rule-select w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
-                            <option value="">-- Pilih Aturan --</option>
-                            ${resultRuleOptions}
-                        </select>
+                <div class="space-y-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                            <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Pilih Aturan Hasil</label>
+                            <select class="result-setting-rule-select w-full text-sm border border-gray-300 rounded-lg focus:outline-none_focus:ring-1 focus:ring-red-500">
+                                <option value="">-- Pilih Aturan --</option>
+                                ${resultRuleOptions}
+                            </select>
+                        </div>
                     </div>
                 </div>
                 
@@ -1021,25 +1045,9 @@ function createResultSettingCard() {
                 
                 <!-- Text Display Area -->
                 <div class="mt-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Teks Hasil</label>
-                        <button type="button" class="add-result-setting-text-btn text-xs font-medium text-red-600 hover:text-red-700">
-                            + Tambah Teks
-                        </button>
-                    </div>
-                    <div class="result-setting-texts space-y-3">
-                        <div class="result-setting-text-block flex items-start space-x-2">
-                            <textarea 
-                                rows="4"
-                                class="result-setting-text w-full text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
-                                placeholder="Teks hasil akan diambil dari aturan yang dipilih"
-                            ></textarea>
-                            <button type="button" class="remove-result-text-btn p-2 text-gray-400 hover:text-red-600 transition-colors hidden" title="Hapus teks">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
+                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Teks Hasil</label>
+                    <div class="result-setting-text-display min-h-[80px] border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-3 text-sm text-gray-700">
+                        <p class="text-sm text-gray-400 italic">Pilih aturan untuk melihat teks hasil.</p>
                     </div>
                 </div>
                 
@@ -1083,60 +1091,98 @@ function attachResultSettingEvents(card) {
     const imageSettings = card.querySelector('.result-setting-image-settings');
     const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
     const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
+    const textDisplay = card.querySelector('.result-setting-text-display');
     const deleteBtn = card.querySelector('.delete-result-setting-btn');
-    const addTextBtn = card.querySelector('.add-result-setting-text-btn');
-    const textBlocksContainer = card.querySelector('.result-setting-texts');
-
-    const getTextAreas = () => Array.from(card.querySelectorAll('.result-setting-texts .result-setting-text'));
 
     const getRuleTextsFromSettings = () => {
-        const resultRulesContainer = document.getElementById('result-rules-container');
-        if (!resultRulesContainer) {
+        const selectedOption = ruleSelect?.selectedOptions[0];
+        if (!selectedOption) {
             return [];
         }
-        const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
-        const selectedIndex = parseInt(ruleSelect?.value ?? '-1', 10);
-        if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= ruleCards.length) {
+        
+        const ruleGroupId = selectedOption.getAttribute('data-rule-group-id');
+        const ruleType = selectedOption.getAttribute('data-rule-type');
+        
+        if (!ruleGroupId) {
             return [];
         }
-        const selectedRule = ruleCards[selectedIndex];
-        if (!selectedRule) {
-            return [];
+        
+        // Get texts from active rules in settings tab
+        if (ruleType === 'active') {
+            const resultRulesContainer = document.getElementById('result-rules-container');
+            if (!resultRulesContainer) {
+                return [];
+            }
+            
+            const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
+            const matchingRules = ruleCards.filter(card => card.getAttribute('data-rule-group-id') === ruleGroupId);
+            
+            // Collect all texts from all matching rules
+            const allTexts = [];
+            matchingRules.forEach(ruleCard => {
+                const texts = Array.from(ruleCard.querySelectorAll('.rule-result-text'))
+                    .map((textarea) => textarea.value.trim())
+                    .filter(Boolean);
+                allTexts.push(...texts);
+            });
+            
+            return allTexts;
         }
-        return Array.from(selectedRule.querySelectorAll('.rule-result-text'))
-            .map((textarea) => textarea.value.trim())
-            .filter(Boolean);
+        
+        // Get texts from saved rules
+        if (ruleType === 'saved') {
+            const savedRules = loadSavedRules();
+            const matchingRule = savedRules.find(r => {
+                const normalized = normalizeSavedRule(r);
+                return normalized.rule_group_id === ruleGroupId;
+            });
+            
+            if (matchingRule) {
+                const normalized = normalizeSavedRule(matchingRule);
+                if (normalized.result_rules && Array.isArray(normalized.result_rules)) {
+                    // Collect all texts from all result rules in this group
+                    const allTexts = [];
+                    normalized.result_rules.forEach(rule => {
+                        if (Array.isArray(rule.texts)) {
+                            allTexts.push(...rule.texts.filter(Boolean));
+                        }
+                    });
+                    return allTexts;
+                }
+            }
+        }
+        
+        return [];
     };
 
-    const ensureDefaultTextBlock = () => {
-        if (!textBlocksContainer) {
+    const updateImageAlignment = () => {
+        if (!imageArea) {
             return;
         }
-        if (!textBlocksContainer.querySelector('.result-setting-text-block')) {
-            addResultSettingTextBlock(card);
-        } else {
-            updateResultSettingTextBlocksState(textBlocksContainer);
-        }
+        const alignment = alignmentSelect?.value || 'center';
+        imageArea.style.textAlign = alignment;
     };
 
-    ensureDefaultTextBlock();
-
-    if (addTextBtn) {
-        addTextBtn.addEventListener('click', () => {
-            const textarea = addResultSettingTextBlock(card);
-            if (textarea) {
-                textarea.focus();
-            }
-        });
-    }
+    const updateTextAlignment = () => {
+        if (!textDisplay) {
+            return;
+        }
+        const alignment = textAlignmentSelect?.value || 'center';
+        textDisplay.style.textAlign = alignment;
+    };
     
     // Update text from selected rule
     if (ruleSelect) {
         ruleSelect.addEventListener('change', function() {
             const ruleTexts = getRuleTextsFromSettings();
             setResultSettingTextValues(card, ruleTexts);
+            updateTextAlignment();
         });
     }
+
+    setResultSettingTextValues(card, []);
+    updateImageAlignment();
+    updateTextAlignment();
     
     // Image upload
     if (addImageBtn && imageFileInput) {
@@ -1161,6 +1207,7 @@ function attachResultSettingEvents(card) {
                 if (imageSettings) {
                     imageSettings.classList.remove('hidden');
                 }
+                updateImageAlignment();
             };
             reader.readAsDataURL(file);
         });
@@ -1184,9 +1231,13 @@ function attachResultSettingEvents(card) {
             if (imageFileInput) {
                 imageFileInput.value = '';
             }
+            updateImageAlignment();
         });
     }
     
+    updateImageAlignment();
+    updateTextAlignment();
+
     // Delete card
     if (deleteBtn) {
         deleteBtn.addEventListener('click', function() {
@@ -2079,12 +2130,13 @@ function generateRuleGroupId() {
 
 function normalizeSavedRule(rule) {
     if (!rule) {
-        return { templates: [], result_rules: [], rule_group_id: generateRuleGroupId() };
+        return { templates: [], result_rules: [], rule_group_id: generateRuleGroupId(), title: null };
     }
 
     const normalized = {
         id: rule.id ?? Date.now(),
         rule_group_id: rule.rule_group_id ?? rule.id ?? generateRuleGroupId(),
+        title: rule.title ?? rule.rule_group_title ?? null,
         templates: Array.isArray(rule.templates) ? rule.templates.slice() : Array.isArray(rule.answer_templates) ? rule.answer_templates.slice() : [],
         result_rules: Array.isArray(rule.result_rules) ? rule.result_rules.slice() : [],
     };
@@ -2159,8 +2211,9 @@ function renderSavedRulesChips() {
             descriptionParts.push(`${resultRules.length} hasil`);
         }
 
+        const displayText = rule.title || descriptionParts.join(' • ');
         chip.innerHTML = `
-            <span class="truncate max-w-[200px]">${descriptionParts.join(' • ')}</span>
+            <span class="truncate max-w-[200px]">${displayText}</span>
             <button type="button" class="edit-saved-rule-btn text-red-500 hover:text-red-700">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m-1-1v2m-6 6l4 4 9-9-4-4-9 9z"></path>
@@ -2233,6 +2286,9 @@ function updateUseRuleButtonsVisibility() {
 }
 
 function gatherRulesFromSettings() {
+    const titleInput = document.getElementById('rule-group-title-input');
+    const title = titleInput?.value?.trim() || null;
+
     const templates = [];
     const templateCards = document.querySelectorAll('.answer-template-card');
     templateCards.forEach((card) => {
@@ -2296,6 +2352,7 @@ function gatherRulesFromSettings() {
     return normalizeSavedRule({
         id: Date.now(),
         rule_group_id: ruleGroupId,
+        title: title,
         templates: enrichedTemplates,
         result_rules: enrichedRules,
     });
@@ -2971,6 +3028,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         answer_templates: answerTemplatesPayload,
                         result_rules: resultRulesPayload,
                         rule_group_id: editingRuleGroupId,
+                        rule_group_title: document.getElementById('rule-group-title-input')?.value?.trim() || null,
                     }),
                 });
 
@@ -3954,22 +4012,24 @@ function collectFormData() {
     const resultSettingCards = questionsContainer.querySelectorAll('.result-setting-card');
     resultSettingCards.forEach((card) => {
         const ruleSelect = card.querySelector('.result-setting-rule-select');
+        // Title removed - now using title from rule_groups
         const imageValueInput = card.querySelector('.result-setting-image-value');
         const alignmentSelect = card.querySelector('.result-setting-image-alignment-select');
         const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
         
-        const resultRuleIndex = ruleSelect ? parseInt(ruleSelect.value) : null;
+        const selectedOption = ruleSelect?.selectedOptions[0];
+        const ruleGroupId = selectedOption ? selectedOption.getAttribute('data-rule-group-id') : null;
         const image = imageValueInput ? imageValueInput.value.trim() : null;
         const imageAlignment = alignmentSelect ? alignmentSelect.value : 'center';
         const textAlignment = textAlignmentSelect ? textAlignmentSelect.value : 'center';
-        const resultTexts = Array.from(card.querySelectorAll('.result-setting-texts .result-setting-text'))
-            .map((textarea) => textarea.value.trim())
-            .filter((text) => text !== '');
+        const storedTexts = card.dataset.resultTexts ? JSON.parse(card.dataset.resultTexts) : [];
+        const resultTexts = Array.isArray(storedTexts) ? storedTexts.filter(Boolean) : [];
         const resultText = resultTexts.length ? resultTexts.join('\n\n') : null;
         
-        if (resultRuleIndex !== null && resultRuleIndex >= 0) {
+        if (ruleGroupId) {
             formData.result_settings.push({
-                result_rule_index: resultRuleIndex,
+                rule_group_id: ruleGroupId, // Use rule_group_id instead of result_rule_index
+                title: null, // Title now comes from rule_groups
                 result_text: resultText,
                 image: image || null,
                 image_alignment: imageAlignment,
@@ -4363,44 +4423,51 @@ function populateFormBuilder(data) {
                 const alignmentSelect = resultSettingCard.querySelector('.result-setting-image-alignment-select');
                 const textAlignmentSelect = resultSettingCard.querySelector('.result-setting-text-alignment-select');
                 
-                // Find matching result rule index (need to match by order since we don't have ID in frontend)
-                // For now, we'll use the order/index from result_rules array
-                const resultRules = Array.isArray(data.result_rules) ? data.result_rules : [];
-                // Try to find by matching texts or use index if available
-                let ruleIndex = -1;
-                if (setting.result_rule_id) {
-                    // If we have rule_id, we need to find it in the loaded rules
-                    // For now, we'll use a simple index-based approach
-                    ruleIndex = resultRules.findIndex((r, idx) => {
-                        // Try to match by result_text if available
-                        if (setting.result_text) {
-                            const ruleTexts = Array.isArray(r.texts) ? r.texts : [];
-                            return ruleTexts.some(t => t === setting.result_text);
-                        }
-                        return false;
-                    });
+                // Find rule_group_id from result_rule_id or use rule_group_id directly
+                let ruleGroupId = null;
+                if (setting.rule_group_id) {
+                    // New format: use rule_group_id directly
+                    ruleGroupId = setting.rule_group_id;
+                } else if (setting.result_rule_id) {
+                    // Old format: find rule_group_id from result_rule_id
+                    const resultRules = Array.isArray(data.result_rules) ? data.result_rules : [];
+                    const matchingRule = resultRules.find(r => r.id === setting.result_rule_id);
+                    if (matchingRule && matchingRule.rule_group_id) {
+                        ruleGroupId = matchingRule.rule_group_id;
+                    }
                 }
                 
-                // If not found, try to use order/index
-                if (ruleIndex < 0 && resultRules.length > 0) {
-                    // Use first available rule as fallback
-                    ruleIndex = 0;
-                }
-                
-                if (ruleIndex >= 0 && ruleSelect) {
-                    ruleSelect.value = ruleIndex;
-                    ruleSelect.dispatchEvent(new Event('change'));
-                }
-                
-                const savedTexts = setting.result_text
-                    ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
-                    : [];
-                if (savedTexts.length) {
+                // Set selected option based on rule_group_id
+                if (ruleGroupId && ruleSelect) {
+                    // Find option with matching rule_group_id
+                    const options = Array.from(ruleSelect.options);
+                    const matchingOption = options.find(opt => opt.getAttribute('data-rule-group-id') === ruleGroupId);
+                    if (matchingOption) {
+                        ruleSelect.value = matchingOption.value;
+                        // Trigger change event to load texts from rules (will get all texts from all rules in group)
+                        ruleSelect.dispatchEvent(new Event('change'));
+                    } else {
+                        // If option not found, use saved texts from database as fallback
+                        const savedTexts = setting.result_text
+                            ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
+                            : [];
+                        setResultSettingTextValues(resultSettingCard, savedTexts);
+                    }
+                } else {
+                    // If no rule_group_id, use saved texts from database
+                    const savedTexts = setting.result_text
+                        ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
+                        : [];
                     setResultSettingTextValues(resultSettingCard, savedTexts);
                 }
                 
-                if (textAlignmentSelect && setting.text_alignment) {
-                    textAlignmentSelect.value = setting.text_alignment;
+                // Title removed - now using title from rule_groups
+                
+                if (textAlignmentSelect) {
+                    if (setting.text_alignment) {
+                        textAlignmentSelect.value = setting.text_alignment;
+                    }
+                    textAlignmentSelect.dispatchEvent(new Event('change'));
                 }
                 
                 if (setting.image) {
@@ -4417,8 +4484,11 @@ function populateFormBuilder(data) {
                     if (imageSettings) {
                         imageSettings.classList.remove('hidden');
                     }
-                    if (alignmentSelect && setting.image_alignment) {
-                        alignmentSelect.value = setting.image_alignment;
+                    if (alignmentSelect) {
+                        if (setting.image_alignment) {
+                            alignmentSelect.value = setting.image_alignment;
+                        }
+                        alignmentSelect.dispatchEvent(new Event('change'));
                     }
                 }
             });

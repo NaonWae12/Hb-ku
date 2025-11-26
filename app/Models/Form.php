@@ -64,4 +64,9 @@ class Form extends Model
     {
         return $this->hasMany(ResultSetting::class)->orderBy('order');
     }
+
+    public function ruleGroups(): HasMany
+    {
+        return $this->hasMany(RuleGroup::class);
+    }
 }

@@ -10,6 +10,7 @@ class ResultSetting extends Model
     protected $fillable = [
         'form_id',
         'result_rule_id',
+        'title',
         'image',
         'image_alignment',
         'result_text',
