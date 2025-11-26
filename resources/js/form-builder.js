@@ -72,56 +72,85 @@ function setResultSettingTextValues(card, textData = []) {
         return;
     }
 
-    // textData should be array of objects: [{result_rule_text_id, result_text, title, image, image_url}]
+    // textData should be array of objects: [{result_rule_text_id, result_rule_id, result_text, title, image, image_url}]
     const sanitized = Array.isArray(textData) ? textData.filter(item => item && item.result_text) : [];
 
     if (!sanitized.length) {
         display.innerHTML = '<p class="text-sm text-gray-400 italic">Pilih aturan untuk melihat teks hasil.</p>';
     } else {
-        // Display each text form in a separate container with title, image, and readOnly result_text
-        display.innerHTML = sanitized
-            .map((item, index) => {
-                const resultRuleTextId = item.result_rule_text_id || item.id || `text-${index}`;
-                const title = item.title || '';
-                const image = item.image || item.image_url || '';
-                const resultTextRaw = item.result_text ?? item.text ?? '';
-                const resultText = typeof resultTextRaw === 'string'
-                    ? resultTextRaw
-                    : extractResultTextValue(resultTextRaw);
-                
-                return `
-                    <div class="result-text-form border border-gray-200 rounded-lg p-4 bg-white ${index > 0 ? 'mt-4' : ''}" data-result-rule-text-id="${resultRuleTextId}">
-                        <!-- Title Input -->
-                        <div class="mb-3">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Judul (opsional)</label>
-                            <input type="text" class="result-text-form-title w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Masukkan judul" value="${title}">
-                        </div>
+        // Group texts by result_rule_id
+        const groupedByRuleId = sanitized.reduce((acc, item) => {
+            const ruleId = item.result_rule_id || 'unknown';
+            if (!acc[ruleId]) {
+                acc[ruleId] = [];
+            }
+            acc[ruleId].push(item);
+            return acc;
+        }, {});
+
+        // Render grouped containers
+        display.innerHTML = Object.entries(groupedByRuleId)
+            .map(([ruleId, texts], containerIndex) => {
+                // Render individual forms for each text in this rule group
+                const formsHTML = texts
+                    .map((item, textIndex) => {
+                        const resultRuleTextId = item.result_rule_text_id || item.id || `text-${textIndex}`;
+                        const title = item.title || '';
+                        const image = item.image || item.image_url || '';
+                        const resultTextRaw = item.result_text ?? item.text ?? '';
+                        const resultText = typeof resultTextRaw === 'string'
+                            ? resultTextRaw
+                            : extractResultTextValue(resultTextRaw);
                         
-                        <!-- Image Upload -->
-                        <div class="mb-3">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Gambar (opsional)</label>
-                            <div class="result-text-form-image-area ${image ? '' : 'hidden'} mb-2">
-                                <div class="relative inline-block">
-                                    <img src="${image}" alt="Text form image" class="result-text-form-image max-w-full h-auto rounded-lg border border-gray-200" style="max-height: 200px;">
-                                    <button type="button" class="remove-result-text-form-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
+                        return `
+                            <div class="result-text-form border border-gray-200 rounded-lg p-4 bg-white ${textIndex > 0 ? 'mt-4' : ''}" data-result-rule-text-id="${resultRuleTextId}" data-result-rule-id="${ruleId}">
+                                <!-- Title Input -->
+                                <div class="mb-3">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Judul (opsional)</label>
+                                    <input type="text" class="result-text-form-title w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500" placeholder="Masukkan judul" value="${title}">
+                                </div>
+                                
+                                <!-- Image Upload -->
+                                <div class="mb-3">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Gambar (opsional)</label>
+                                    <div class="result-text-form-image-area ${image ? '' : 'hidden'} mb-2">
+                                        <div class="relative inline-block">
+                                            <img src="${image}" alt="Text form image" class="result-text-form-image max-w-full h-auto rounded-lg border border-gray-200" style="max-height: 200px;">
+                                            <button type="button" class="remove-result-text-form-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <input type="file" accept="image/*" class="hidden result-text-form-image-file-input" data-result-rule-text-id="${resultRuleTextId}">
+                                    <input type="hidden" class="result-text-form-image-value" data-result-rule-text-id="${resultRuleTextId}" value="${image}">
+                                    <button type="button" class="add-result-text-form-image-btn px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                                        ${image ? 'Ganti Gambar' : 'Tambahkan Gambar'}
                                     </button>
                                 </div>
+                                
+                                <!-- Result Text (ReadOnly) -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Teks Hasil</label>
+                                    <textarea readonly class="result-text-form-text w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-700 resize-none" rows="3">${resultText}</textarea>
+                                </div>
                             </div>
-                            <input type="file" accept="image/*" class="hidden result-text-form-image-file-input" data-result-rule-text-id="${resultRuleTextId}">
-                            <input type="hidden" class="result-text-form-image-value" data-result-rule-text-id="${resultRuleTextId}" value="${image}">
-                            <button type="button" class="add-result-text-form-image-btn px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                                ${image ? 'Ganti Gambar' : 'Tambahkan Gambar'}
-                            </button>
+                        `;
+                    })
+                    .join('');
+
+                // Container untuk setiap result_rule_id
+                return `
+                    <div class="result-rule-container border-2 border-blue-200 rounded-lg p-4 mb-4 bg-blue-50" data-result-rule-id="${ruleId}">
+                        <div class="text-xs font-semibold text-blue-700 mb-3 flex items-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <span>Aturan ${ruleId !== 'unknown' ? ruleId : 'Tidak Diketahui'}</span>
+                            <span class="text-blue-500 font-normal">(${texts.length} teks)</span>
                         </div>
-                        
-                        <!-- Result Text (ReadOnly) -->
-                        <div>
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Teks Hasil</label>
-                            <textarea readonly class="result-text-form-text w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-700 resize-none" rows="3">${resultText}</textarea>
-                        </div>
+                        ${formsHTML}
                     </div>
                 `;
             })
@@ -231,6 +260,7 @@ function cloneResultTextItems(items = []) {
                         || item.id
                         || item.temp_id
                         || `lookup-${timestamp}-${index}`,
+                    result_rule_id: item.result_rule_id || null, // Tambahkan result_rule_id jika ada
                     result_text: text,
                     title: item.title || null,
                     image: item.image || item.image_url || null,
@@ -256,8 +286,16 @@ function buildRuleGroupTextLookup(data) {
             return;
         }
 
-        const texts = cloneResultTextItems(rule.texts || []);
-        if (!texts.length) {
+        // Clone texts and add result_rule_id to each text
+        const texts = (rule.texts || []).map((text) => {
+            const cloned = typeof text === 'object' 
+                ? { ...text, result_rule_id: rule.id || null }
+                : text;
+            return cloned;
+        });
+        
+        const clonedTexts = cloneResultTextItems(texts);
+        if (!clonedTexts.length) {
             return;
         }
 
@@ -265,7 +303,8 @@ function buildRuleGroupTextLookup(data) {
             lookup[groupId] = [];
         }
 
-        lookup[groupId] = texts;
+        // Merge texts instead of replacing (in case multiple rules have same groupId)
+        lookup[groupId] = [...(lookup[groupId] || []), ...clonedTexts];
     });
 
     return lookup;
@@ -281,7 +320,18 @@ function updateRuleGroupTextLookup(ruleGroupId, items = []) {
         return;
     }
 
-    ruleGroupTextLookup[ruleGroupId] = clones;
+    // Merge dengan data yang sudah ada (jika ada) untuk memastikan tidak ada yang terlewat
+    // Tapi untuk form yang sudah ada di database, lookup sudah lengkap dari initialData
+    // Jadi ini lebih untuk form baru yang belum disimpan
+    if (ruleGroupTextLookup[ruleGroupId] && ruleGroupTextLookup[ruleGroupId].length > 0) {
+        // Merge: gabungkan dengan data yang sudah ada, hindari duplikat berdasarkan result_rule_text_id
+        const existingIds = new Set(ruleGroupTextLookup[ruleGroupId].map(item => item.result_rule_text_id));
+        const newItems = clones.filter(item => !existingIds.has(item.result_rule_text_id));
+        ruleGroupTextLookup[ruleGroupId] = [...ruleGroupTextLookup[ruleGroupId], ...newItems];
+    } else {
+        // Jika belum ada, langsung set
+        ruleGroupTextLookup[ruleGroupId] = clones;
+    }
 }
 
 function getRuleGroupTextFromLookup(ruleGroupId) {
@@ -1343,44 +1393,55 @@ function attachResultSettingEvents(card) {
             });
         };
         
-        // Get texts from active rules in settings tab
+        // Get texts from active rules - langsung dari lookup table (data dari database)
+        // Tidak perlu ambil dari DOM karena result_text readonly dan data sudah lengkap di lookup table
         if (ruleType === 'active') {
+            // Prioritaskan lookup table yang sudah di-build dari initialData (database)
+            // Lookup table sudah lengkap dengan semua result_text dari semua result_rules dalam rule_group_id
+            const textsFromLookup = getRuleGroupTextFromLookup(ruleGroupId);
+            
+            if (textsFromLookup.length) {
+                logResultTexts('active-lookup', textsFromLookup);
+                return textsFromLookup;
+            }
+            
+            // Fallback: coba ambil dari DOM jika lookup kosong (untuk form baru yang belum disimpan)
             const resultRulesContainer = document.getElementById('result-rules-container');
-            if (!resultRulesContainer) {
-                const fallback = getRuleGroupTextFromLookup(ruleGroupId);
-                logResultTexts('active-no-container', fallback);
-                return fallback;
-            }
-            
-            const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
-            const matchingRules = ruleCards.filter(card => card.getAttribute('data-rule-group-id') === ruleGroupId);
-            
-            // Collect all texts from all matching rules with temporary IDs
-            const allTexts = [];
-            matchingRules.forEach((ruleCard, ruleIndex) => {
-                const textareas = Array.from(ruleCard.querySelectorAll('.rule-result-text'));
-                textareas.forEach((textarea, textIndex) => {
-                    const text = textarea.value.trim();
-                    if (text) {
-                        allTexts.push({
-                            result_rule_text_id: `temp-${ruleGroupId}-${ruleIndex}-${textIndex}`, // Temporary ID for active rules
-                            result_text: text,
-                            title: null,
-                            image: null,
-                        });
-                    }
+            if (resultRulesContainer) {
+                const ruleCards = Array.from(resultRulesContainer.querySelectorAll('.result-rule-card'));
+                const matchingRules = ruleCards.filter(card => card.getAttribute('data-rule-group-id') === ruleGroupId);
+                
+                // Collect all texts from all matching rules with temporary IDs
+                const allTexts = [];
+                matchingRules.forEach((ruleCard, ruleIndex) => {
+                    // Get result_rule_id from data-db-id (database ID) or use temporary ID
+                    const resultRuleId = ruleCard.getAttribute('data-db-id') || `temp-rule-${ruleIndex}`;
+                    const textareas = Array.from(ruleCard.querySelectorAll('.rule-result-text'));
+                    textareas.forEach((textarea, textIndex) => {
+                        const text = textarea.value.trim();
+                        if (text) {
+                            allTexts.push({
+                                result_rule_text_id: `temp-${ruleGroupId}-${ruleIndex}-${textIndex}`, // Temporary ID for active rules
+                                result_rule_id: resultRuleId, // Tambahkan result_rule_id untuk grouping
+                                result_text: text,
+                                title: null,
+                                image: null,
+                            });
+                        }
+                    });
                 });
-            });
-            
-            if (allTexts.length) {
-                updateRuleGroupTextLookup(ruleGroupId, allTexts);
-                logResultTexts('active-builder', allTexts);
-                return allTexts;
+                
+                if (allTexts.length) {
+                    // Update lookup table untuk form baru
+                    updateRuleGroupTextLookup(ruleGroupId, allTexts);
+                    logResultTexts('active-builder-fallback', allTexts);
+                    return allTexts;
+                }
             }
-
-            const fallback = getRuleGroupTextFromLookup(ruleGroupId);
-            logResultTexts('active-fallback', fallback);
-            return fallback;
+            
+            // Final fallback: return empty array
+            logResultTexts('active-empty', []);
+            return [];
         }
         
         // Get texts from saved rules
@@ -1397,6 +1458,8 @@ function attachResultSettingEvents(card) {
                     // Collect all texts from all result rules in this group
                     const allTexts = [];
                     normalized.result_rules.forEach((rule, ruleIndex) => {
+                        // Get result_rule_id from rule.id or use ruleIndex as fallback
+                        const resultRuleId = rule.id || ruleIndex || `saved-rule-${ruleIndex}`;
                         if (Array.isArray(rule.texts)) {
                             rule.texts.forEach((text, textIndex) => {
                                 const textValue = typeof text === 'string'
@@ -1409,6 +1472,7 @@ function attachResultSettingEvents(card) {
                                             : (rule.text_ids && rule.text_ids[textIndex]
                                                 ? rule.text_ids[textIndex]
                                                 : `saved-${ruleGroupId}-${ruleIndex}-${textIndex}`),
+                                        result_rule_id: resultRuleId, // Tambahkan result_rule_id untuk grouping
                                         result_text: textValue,
                                         title: text && typeof text === 'object' ? (text.title || null) : null,
                                         image: text && typeof text === 'object'

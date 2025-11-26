@@ -7,7 +7,9 @@ use App\Models\FormResponse;
 use App\Models\SettingResult;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -18,7 +20,7 @@ class FormController extends Controller
      */
     public function index()
     {
-        $userId = auth()->id();
+        $userId = Auth::id();
 
         $formsQuery = Form::withCount(['questions', 'responses'])
             ->where('user_id', $userId)
@@ -33,9 +35,9 @@ class FormController extends Controller
 
         $activeThisMonth = $formIds->isNotEmpty()
             ? FormResponse::whereIn('form_id', $formIds)
-                ->whereBetween('created_at', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
-                ->distinct()
-                ->count('form_id')
+            ->whereBetween('created_at', [Carbon::now()->startOfMonth(), Carbon::now()->endOfMonth()])
+            ->distinct()
+            ->count('form_id')
             : 0;
 
         $stats = [
@@ -96,7 +98,7 @@ class FormController extends Controller
             DB::beginTransaction();
 
             $form = Form::create([
-                'user_id' => auth()->id(),
+                'user_id' => Auth::id(),
                 'title' => $request->title,
                 'description' => $request->description,
                 'slug' => Str::slug($request->title) . '-' . time(),
@@ -130,7 +132,6 @@ class FormController extends Controller
                 'save_method' => 'PUT',
                 'form_rules_save_url' => route('forms.rules.store', $form),
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -145,7 +146,7 @@ class FormController extends Controller
      */
     public function edit(Form $form)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -194,7 +195,7 @@ class FormController extends Controller
      */
     public function update(Request $request, Form $form)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -223,7 +224,7 @@ class FormController extends Controller
 
             // Hapus semua aturan form sebelum sinkronisasi ulang
             $this->resetFormRules($form);
-            
+
             // Hapus questions dan sections setelah menghapus dependencies
             $form->questions()->delete();
             $form->sections()->delete();
@@ -264,7 +265,7 @@ class FormController extends Controller
      */
     public function updateRules(Request $request, Form $form)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -302,7 +303,7 @@ class FormController extends Controller
             DB::beginTransaction();
 
             $this->persistFormRules($form, $data, true, $templateOrderBase, $ruleOrderBase, $ruleGroupId);
-            
+
             // Save or update rule group title
             $ruleGroupTitle = $data['rule_group_title'] ?? null;
             if ($ruleGroupId) {
@@ -379,7 +380,7 @@ class FormController extends Controller
      */
     public function destroyAnswerTemplate(Form $form, $templateId)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -404,7 +405,7 @@ class FormController extends Controller
      */
     public function destroyResultRule(Form $form, $ruleId)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -429,7 +430,7 @@ class FormController extends Controller
      */
     public function destroy(Form $form)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -456,7 +457,7 @@ class FormController extends Controller
      */
     public function responses(Form $form)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -475,7 +476,7 @@ class FormController extends Controller
      */
     public function responsesData(Form $form)
     {
-        if ($form->user_id !== auth()->id()) {
+        if ($form->user_id !== Auth::id()) {
             abort(403);
         }
 
@@ -661,7 +662,7 @@ class FormController extends Controller
             $extension = 'jpg';
         }
         $contents = ob_get_clean();
-        \imagedestroy($image);
+        // imagedestroy() is deprecated in PHP 8.0+ - resources are automatically destroyed
 
         if ($contents === false) {
             throw new \RuntimeException('Unable to prepare image for storage.');
@@ -669,10 +670,10 @@ class FormController extends Controller
 
         $directory = "question-images/{$form->id}";
         $filename = Str::random(40) . '.' . $extension;
-        
+
         // Ensure directory exists
         Storage::disk('public')->makeDirectory($directory);
-        
+
         // Store the file
         Storage::disk('public')->put("{$directory}/{$filename}", $contents);
 
@@ -702,7 +703,7 @@ class FormController extends Controller
         \imagealphablending($resampled, false);
         \imagesavealpha($resampled, true);
         \imagecopyresampled($resampled, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-        \imagedestroy($image);
+        // imagedestroy() is deprecated in PHP 8.0+ - resources are automatically destroyed
 
         return $resampled;
     }
@@ -940,10 +941,11 @@ class FormController extends Controller
                 return $rules->flatMap(function ($rule) {
                     return $rule->texts
                         ->sortBy('order')
-                        ->map(function ($text) {
+                        ->map(function ($text) use ($rule) {
                             $textSetting = $text->textSetting;
                             return [
                                 'result_rule_text_id' => $text->id,
+                                'result_rule_id' => $rule->id, // Tambahkan result_rule_id untuk grouping
                                 'result_text' => $text->result_text,
                                 'title' => $textSetting ? $textSetting->title : null,
                                 'image' => $textSetting ? $textSetting->image : null,
@@ -967,7 +969,7 @@ class FormController extends Controller
                         $ruleGroupId = $rule->rule_group_id;
                     }
                 }
-                
+
                 return [
                     'result_rule_id' => $setting->result_rule_id,
                     'rule_group_id' => $ruleGroupId, // Add rule_group_id for frontend
@@ -1082,9 +1084,9 @@ class FormController extends Controller
         array $payload,
         bool $append = false,
         ?int $templateOrderOverride = null,
-        ?int $ruleOrderOverride = null
-    ): array
-    {
+        ?int $ruleOrderOverride = null,
+        ?string $ruleGroupId = null
+    ): array {
         $answerTemplateIdMap = [];
         $answerTemplateLookup = [];
         $answerTemplates = $payload['answer_templates'] ?? [];
@@ -1115,14 +1117,17 @@ class FormController extends Controller
                 continue;
             }
 
-            $ruleGroupId = $templateData['rule_group_id'] ?? (string) Str::uuid();
+            // Use provided ruleGroupId if available, otherwise use from payload or generate new UUID
+            $templateRuleGroupId = $ruleGroupId
+                ?? $templateData['rule_group_id']
+                ?? (string) Str::uuid();
 
             $template = $form->answerTemplates()->create([
                 'form_id' => $form->id,
                 'answer_text' => $answerText,
                 'score' => $templateData['score'] ?? 0,
                 'order' => $templateOrderBase + $index,
-                'rule_group_id' => $ruleGroupId,
+                'rule_group_id' => $templateRuleGroupId,
             ]);
 
             $answerTemplateIdMap[$index] = $template->id;
@@ -1142,7 +1147,10 @@ class FormController extends Controller
                 continue;
             }
 
-            $ruleGroupId = $ruleData['rule_group_id'] ?? (string) Str::uuid();
+            // Use provided ruleGroupId if available, otherwise use from payload or generate new UUID
+            $ruleRuleGroupId = $ruleGroupId
+                ?? $ruleData['rule_group_id']
+                ?? (string) Str::uuid();
 
             $rule = $form->resultRules()->create([
                 'form_id' => $form->id,
@@ -1151,7 +1159,7 @@ class FormController extends Controller
                 'max_score' => $ruleData['max_score'] ?? null,
                 'single_score' => $ruleData['single_score'] ?? null,
                 'order' => $ruleOrderBase + $index,
-                'rule_group_id' => $ruleGroupId,
+                'rule_group_id' => $ruleRuleGroupId,
             ]);
 
             $resultRuleIdMap[$index] = $rule->id;
@@ -1165,7 +1173,7 @@ class FormController extends Controller
                 $rule->texts()->create([
                     'result_text' => $textValue,
                     'order' => $textIndex,
-                    'rule_group_id' => $ruleGroupId,
+                    'rule_group_id' => $ruleRuleGroupId,
                 ]);
             }
         }
@@ -1239,7 +1247,7 @@ class FormController extends Controller
             }
 
             $resultRuleId = null;
-            
+
             // Handle both old format (result_rule_index) and new format (rule_group_id)
             if (isset($settingData['rule_group_id'])) {
                 // New format: get first result_rule_id from rule_group_id
@@ -1263,7 +1271,7 @@ class FormController extends Controller
                     $resultText = $rule->texts->first()->result_text;
                 }
             }
-            
+
             // If no resultText and we have rule_group_id, collect all texts from all rules in the group
             if (!$resultText && isset($settingData['rule_group_id'])) {
                 $ruleGroupId = $settingData['rule_group_id'];
@@ -1271,7 +1279,7 @@ class FormController extends Controller
                     ->where('rule_group_id', $ruleGroupId)
                     ->with('texts')
                     ->get();
-                
+
                 $allTexts = [];
                 foreach ($rules as $rule) {
                     foreach ($rule->texts as $text) {
@@ -1317,8 +1325,8 @@ class FormController extends Controller
     private function syncSettingResults(Form $form, array $payload): void
     {
         $resultTextSettings = $payload['result_text_settings'] ?? [];
-        
-        \Log::info('SyncSettingResults called', [
+
+        Log::info('SyncSettingResults called', [
             'form_id' => $form->id,
             'result_text_settings_count' => count($resultTextSettings),
             'result_text_settings' => $resultTextSettings,
@@ -1333,13 +1341,13 @@ class FormController extends Controller
 
         foreach ($resultTextSettings as $settingData) {
             if (!is_array($settingData)) {
-                \Log::warning('Invalid setting data (not array)', ['setting_data' => $settingData]);
+                Log::warning('Invalid setting data (not array)', ['setting_data' => $settingData]);
                 continue;
             }
 
             $ruleGroupId = $settingData['rule_group_id'] ?? null;
             if (!$ruleGroupId) {
-                \Log::warning('Missing rule_group_id in setting data', ['setting_data' => $settingData]);
+                Log::warning('Missing rule_group_id in setting data', ['setting_data' => $settingData]);
                 continue;
             }
 
@@ -1352,14 +1360,14 @@ class FormController extends Controller
                 ->with('texts')
                 ->get();
 
-            \Log::info('Found rules for rule_group_id', [
+            Log::info('Found rules for rule_group_id', [
                 'rule_group_id' => $ruleGroupId,
                 'rules_count' => $resultRules->count(),
                 'rule_ids' => $resultRules->pluck('id')->toArray(),
             ]);
 
             if ($resultRules->isEmpty()) {
-                \Log::warning('No rules found for rule_group_id', [
+                Log::warning('No rules found for rule_group_id', [
                     'rule_group_id' => $ruleGroupId,
                     'form_id' => $form->id,
                     'all_rule_groups' => $form->resultRules()->distinct()->pluck('rule_group_id')->toArray(),
@@ -1381,11 +1389,11 @@ class FormController extends Controller
                 }
             }
 
-            \Log::info('Matching texts with settings', [
+            Log::info('Matching texts with settings', [
                 'rule_group_id' => $ruleGroupId,
                 'all_texts_count' => count($allTexts),
                 'text_settings_count' => count($textSettings),
-                'all_texts' => array_map(function($t) {
+                'all_texts' => array_map(function ($t) {
                     return ['id' => $t->id, 'order' => $t->order, 'text' => substr($t->result_text, 0, 50)];
                 }, $allTexts),
                 'text_settings' => $textSettings,
@@ -1396,13 +1404,13 @@ class FormController extends Controller
                 if (!is_array($ts)) {
                     continue;
                 }
-                
+
                 $textIndex = isset($ts['order']) ? (int) $ts['order'] : $settingIndex;
-                
+
                 // Find text by order position
                 if (isset($allTexts[$textIndex])) {
                     $text = $allTexts[$textIndex];
-                    
+
                     SettingResult::create([
                         'form_id' => $form->id,
                         'rule_group_id' => $ruleGroupId,
@@ -1413,28 +1421,28 @@ class FormController extends Controller
                         'text_alignment' => $textAlignment,
                         'order' => $ts['order'] ?? $text->order ?? $textIndex,
                     ]);
-                    
-                    \Log::info('Created SettingResult', [
+
+                    Log::info('Created SettingResult', [
                         'form_id' => $form->id,
                         'rule_group_id' => $ruleGroupId,
                         'result_rule_text_id' => $text->id,
                         'order' => $ts['order'] ?? $text->order ?? $textIndex,
                     ]);
                 } else {
-                    \Log::warning('Text not found for setting', [
+                    Log::warning('Text not found for setting', [
                         'text_index' => $textIndex,
                         'all_texts_count' => count($allTexts),
                         'setting' => $ts,
                     ]);
                 }
             }
-            
+
             // Also create settings for any texts that weren't matched (use default values)
             foreach ($allTexts as $textIndex => $text) {
                 $alreadyMatched = SettingResult::where('form_id', $form->id)
                     ->where('result_rule_text_id', $text->id)
                     ->exists();
-                    
+
                 if (!$alreadyMatched) {
                     SettingResult::create([
                         'form_id' => $form->id,
@@ -1446,8 +1454,8 @@ class FormController extends Controller
                         'text_alignment' => $textAlignment,
                         'order' => $text->order ?? $textIndex,
                     ]);
-                    
-                    \Log::info('Created SettingResult (default)', [
+
+                    Log::info('Created SettingResult (default)', [
                         'form_id' => $form->id,
                         'rule_group_id' => $ruleGroupId,
                         'result_rule_text_id' => $text->id,
@@ -1464,17 +1472,17 @@ class FormController extends Controller
             ?? $data['result_rules'][0]['rule_group_id']
             ?? (string) Str::uuid();
 
+        // Force all templates and rules to use the same rule_group_id for consistency
         $data['answer_templates'] = array_map(function ($template) use ($ruleGroupId) {
-            $template['rule_group_id'] = $template['rule_group_id'] ?? $ruleGroupId;
+            $template['rule_group_id'] = $ruleGroupId;
             return $template;
         }, $data['answer_templates'] ?? []);
 
         $data['result_rules'] = array_map(function ($rule) use ($ruleGroupId) {
-            $rule['rule_group_id'] = $rule['rule_group_id'] ?? $ruleGroupId;
+            $rule['rule_group_id'] = $ruleGroupId;
             return $rule;
         }, $data['result_rules'] ?? []);
 
         return $ruleGroupId;
     }
 }
-

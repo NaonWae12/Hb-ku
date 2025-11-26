@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Form;
 use App\Models\FormResponse;
 use App\Models\ResponseAnswer;
+use App\Models\SettingResult;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -55,14 +56,14 @@ class PublicFormController extends Controller
         if (!$section) {
             return false;
         }
-        
+
         $title = trim($section->title ?? '');
         $description = trim($section->description ?? '');
         $hasImage = !empty($section->image);
-        
+
         // Check if title is not empty and not a default "Bagian X" pattern
         $hasValidTitle = $title !== '' && !preg_match('/^Bagian\s+\d+$/i', $title);
-        
+
         return $hasValidTitle || $description !== '' || $hasImage;
     }
 
@@ -76,25 +77,25 @@ class PublicFormController extends Controller
     {
         $allQuestions = $form->questions->sortBy('order')->values();
         $sections = $form->sections->sortBy('order')->values();
-        
+
         $pages = [];
         $currentPageQuestions = [];
         $currentPageSection = null;
-        
+
         // Create a map of section_id to section for quick lookup (all sections)
         $sectionMap = $sections->keyBy('id');
-        
+
         // Process each question in order
         foreach ($allQuestions as $question) {
             $questionSectionId = $question->section_id;
-            
+
             if ($questionSectionId === null) {
                 // Question has no section - add to current page
                 $currentPageQuestions[] = $question;
             } else {
                 // Question belongs to a section
                 $questionSection = $sectionMap->get($questionSectionId);
-                
+
                 if ($questionSection) {
                     // Section always acts as divider, regardless of whether it's edited
                     if ($currentPageSection && $currentPageSection->id === $questionSectionId) {
@@ -109,7 +110,7 @@ class PublicFormController extends Controller
                                 'questions' => $currentPageQuestions,
                             ];
                         }
-                        
+
                         // Start new page with this section (always use as divider)
                         $currentPageSection = $questionSection;
                         $currentPageQuestions = [$question];
@@ -120,7 +121,7 @@ class PublicFormController extends Controller
                 }
             }
         }
-        
+
         // Add the last page
         if (count($currentPageQuestions) > 0 || $currentPageSection) {
             $pages[] = [
@@ -128,13 +129,13 @@ class PublicFormController extends Controller
                 'questions' => $currentPageQuestions,
             ];
         }
-        
+
         // Handle section dividers (sections with no questions)
         // These should split questions based on order
         // All sections act as dividers, but only edited ones are displayed
         foreach ($sections as $section) {
             $sectionQuestions = $allQuestions->where('section_id', $section->id);
-            
+
             // If this is a section divider (no questions assigned to it)
             // Section always acts as divider, regardless of whether it's edited
             if ($sectionQuestions->isEmpty()) {
@@ -145,54 +146,54 @@ class PublicFormController extends Controller
                     ->where('order', '<', $section->order)
                     ->whereNull('section_id')
                     ->values();
-                
+
                 $questionsAfter = $allQuestions
                     ->where('order', '>', $section->order)
                     ->whereNull('section_id')
                     ->values();
-                
+
                 // If we have both before and after, we need to split
                 if ($questionsBefore->isNotEmpty() && $questionsAfter->isNotEmpty()) {
                     // Rebuild pages to account for this divider
                     $newPages = [];
                     $splitDone = false;
-                    
+
                     foreach ($pages as $page) {
                         if (!$splitDone && $page['section'] === null) {
                             // Check if this page contains questions that should be split
                             $pageQuestionIds = collect($page['questions'])->pluck('id')->toArray();
                             $beforeIds = $questionsBefore->pluck('id')->toArray();
                             $afterIds = $questionsAfter->pluck('id')->toArray();
-                            
+
                             $hasBefore = count(array_intersect($pageQuestionIds, $beforeIds)) > 0;
                             $hasAfter = count(array_intersect($pageQuestionIds, $afterIds)) > 0;
-                            
+
                             if ($hasBefore && $hasAfter) {
                                 // Split this page
                                 $beforeQuestions = collect($page['questions'])
                                     ->where('order', '<', $section->order)
                                     ->values()
                                     ->toArray();
-                                
+
                                 $afterQuestions = collect($page['questions'])
                                     ->where('order', '>', $section->order)
                                     ->values()
                                     ->toArray();
-                                
+
                                 if (count($beforeQuestions) > 0) {
                                     $newPages[] = [
                                         'section' => null,
                                         'questions' => $beforeQuestions,
                                     ];
                                 }
-                                
+
                                 if (count($afterQuestions) > 0) {
                                     $newPages[] = [
                                         'section' => $this->isSectionEdited($section) ? $section : null,
                                         'questions' => $afterQuestions,
                                     ];
                                 }
-                                
+
                                 $splitDone = true;
                             } else {
                                 $newPages[] = $page;
@@ -201,14 +202,14 @@ class PublicFormController extends Controller
                             $newPages[] = $page;
                         }
                     }
-                    
+
                     if ($splitDone) {
                         $pages = $newPages;
                     }
                 }
             }
         }
-        
+
         // If no pages were created, create one with all questions
         if (empty($pages)) {
             $pages[] = [
@@ -216,7 +217,7 @@ class PublicFormController extends Controller
                 'questions' => $allQuestions->toArray(),
             ];
         }
-        
+
         return $pages;
     }
 
@@ -227,7 +228,7 @@ class PublicFormController extends Controller
         $form->load([
             'sections.questions.options.answerTemplate',
             'questions.options.answerTemplate',
-            'resultRules.texts',
+            'resultRules.texts.textSetting',
         ]);
 
         $allQuestions = collect($form->questions)
@@ -260,9 +261,9 @@ class PublicFormController extends Controller
 
         $answers = $validated['answers'] ?? [];
         $totalScore = 0;
-        $finalResultText = null;
+        $finalResultData = null;
 
-        DB::transaction(function () use ($form, $validated, $answers, &$totalScore, &$finalResultText, $request, $allQuestions) {
+        DB::transaction(function () use ($form, $validated, $answers, &$totalScore, &$finalResultData, $request, $allQuestions) {
             $formResponse = FormResponse::create([
                 'form_id' => $form->id,
                 'email' => $validated['email'] ?? null,
@@ -326,19 +327,25 @@ class PublicFormController extends Controller
                 }
             }
 
-            $resultText = $this->resolveResultText($form, $totalScore);
-            $finalResultText = $resultText;
+            $resultData = $this->resolveResultText($form, $totalScore);
+            $finalResultData = $resultData;
+
+            // Store plain text for backward compatibility
+            $resultTextPlain = null;
+            if ($resultData && isset($resultData['texts'])) {
+                $resultTextPlain = implode("\n\n", array_column($resultData['texts'], 'result_text'));
+            }
 
             $formResponse->update([
                 'total_score' => $totalScore,
-                'result_text' => $resultText,
+                'result_text' => $resultTextPlain,
             ]);
         });
 
         return redirect()
             ->route('forms.public.show', $form)
             ->with('status', 'Terima kasih! Jawaban Anda telah disimpan.')
-            ->with('result_text', $finalResultText);
+            ->with('result_data', $finalResultData);
     }
 
     private function buildQuestionValidation(int $questionId, bool $isRequired, string $type, array &$rules, array &$messages): void
@@ -360,7 +367,7 @@ class PublicFormController extends Controller
         }
     }
 
-    private function resolveResultText(Form $form, int $totalScore): ?string
+    private function resolveResultText(Form $form, int $totalScore): ?array
     {
         $matchingRule = $form->resultRules
             ->sortBy('order')
@@ -379,9 +386,58 @@ class PublicFormController extends Controller
             return null;
         }
 
-        $texts = $matchingRule->texts->pluck('result_text')->filter()->toArray();
+        // Get all texts from matching rule (ordered by order)
+        $allRuleTexts = $matchingRule->texts->sortBy('order')->values();
 
-        return $texts ? implode("\n\n", $texts) : null;
+        if ($allRuleTexts->isEmpty()) {
+            return null;
+        }
+
+        $ruleGroupId = $matchingRule->rule_group_id;
+
+        // Load setting_results for this rule_group_id (if exists)
+        $settingResults = null;
+        $textAlignment = 'center';
+        $imageAlignment = 'center';
+
+        if ($ruleGroupId) {
+            $settingResults = SettingResult::where('form_id', $form->id)
+                ->where('rule_group_id', $ruleGroupId)
+                ->with('resultRuleText')
+                ->orderBy('order')
+                ->get()
+                ->keyBy('result_rule_text_id');
+
+            // Get alignment from first setting if exists
+            if ($settingResults->isNotEmpty()) {
+                $firstSetting = $settingResults->first();
+                $textAlignment = $firstSetting->text_alignment ?? 'center';
+                $imageAlignment = $firstSetting->image_alignment ?? 'center';
+            }
+        }
+
+        // Build texts array: get all texts from rule, merge with settings if available
+        $texts = $allRuleTexts->map(function ($ruleText) use ($settingResults) {
+            $setting = $settingResults ? $settingResults->get($ruleText->id) : null;
+
+            return [
+                'title' => $setting ? $setting->title : null,
+                'image' => $setting ? $setting->image : null,
+                'image_url' => $setting && $setting->image ? asset($setting->image) : null,
+                'result_text' => $ruleText->result_text ?? '',
+            ];
+        })->filter(function ($text) {
+            return !empty($text['result_text']);
+        })->values()->toArray();
+
+        if (empty($texts)) {
+            return null;
+        }
+
+        return [
+            'text_alignment' => $textAlignment,
+            'image_alignment' => $imageAlignment,
+            'texts' => $texts,
+        ];
     }
 }
-
