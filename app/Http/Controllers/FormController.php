@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Form;
 use App\Models\FormResponse;
-use App\Models\ResultTextSetting;
+use App\Models\SettingResult;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -114,6 +114,7 @@ class FormController extends Controller
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
                 'result_settings' => $request->input('result_settings', []),
+                'result_text_settings' => $request->input('result_text_settings', []),
             ]);
 
             DB::commit();
@@ -233,6 +234,7 @@ class FormController extends Controller
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
                 'result_settings' => $request->input('result_settings', []),
+                'result_text_settings' => $request->input('result_text_settings', []),
             ]);
 
             DB::commit();
@@ -817,7 +819,7 @@ class FormController extends Controller
         }
 
         $this->syncResultSettings($form, $payload, $resultRuleIdMap);
-        $this->syncResultTextSettings($form, $payload, $resultRuleIdMap);
+        $this->syncSettingResults($form, $payload);
     }
 
     /**
@@ -913,6 +915,8 @@ class FormController extends Controller
                             'title' => $textSetting ? $textSetting->title : null,
                             'image' => $textSetting ? $textSetting->image : null,
                             'image_url' => $textSetting && $textSetting->image ? asset($textSetting->image) : null,
+                            'text_alignment' => $textSetting ? $textSetting->text_alignment : 'center',
+                            'image_alignment' => $textSetting ? $textSetting->image_alignment : 'center',
                         ];
                     })
                     ->toArray();
@@ -944,6 +948,8 @@ class FormController extends Controller
                                 'title' => $textSetting ? $textSetting->title : null,
                                 'image' => $textSetting ? $textSetting->image : null,
                                 'image_url' => $textSetting && $textSetting->image ? asset($textSetting->image) : null,
+                                'text_alignment' => $textSetting ? $textSetting->text_alignment : 'center',
+                                'image_alignment' => $textSetting ? $textSetting->image_alignment : 'center',
                             ];
                         });
                 })->values()->toArray();
@@ -1308,67 +1314,144 @@ class FormController extends Controller
     /**
      * Sync result text settings (new structure with title and image per text)
      */
-    private function syncResultTextSettings(Form $form, array $payload, array $resultRuleIdMap): void
+    private function syncSettingResults(Form $form, array $payload): void
     {
         $resultTextSettings = $payload['result_text_settings'] ?? [];
+        
+        \Log::info('SyncSettingResults called', [
+            'form_id' => $form->id,
+            'result_text_settings_count' => count($resultTextSettings),
+            'result_text_settings' => $resultTextSettings,
+        ]);
 
-        // Delete existing result text settings for this form
-        $ruleGroupIds = collect($resultTextSettings)->pluck('rule_group_id')->filter()->unique();
-        if ($ruleGroupIds->isNotEmpty()) {
-            // Get all result_rule_text_ids from these rule groups
-            $resultRuleTextIds = $form->resultRules()
-                ->whereIn('rule_group_id', $ruleGroupIds)
-                ->with('texts')
-                ->get()
-                ->flatMap(function ($rule) {
-                    return $rule->texts->pluck('id');
-                })
-                ->toArray();
+        // Remove existing settings for the form to avoid duplicates
+        SettingResult::where('form_id', $form->id)->delete();
 
-            if (!empty($resultRuleTextIds)) {
-                ResultTextSetting::whereIn('result_rule_text_id', $resultRuleTextIds)->delete();
-            }
-        }
+        // Refresh form to ensure rules are loaded from database
+        $form->refresh();
+        $form->load(['resultRules.texts']);
 
         foreach ($resultTextSettings as $settingData) {
             if (!is_array($settingData)) {
+                \Log::warning('Invalid setting data (not array)', ['setting_data' => $settingData]);
                 continue;
             }
 
             $ruleGroupId = $settingData['rule_group_id'] ?? null;
             if (!$ruleGroupId) {
+                \Log::warning('Missing rule_group_id in setting data', ['setting_data' => $settingData]);
                 continue;
             }
 
-            // Get all result_rule_texts for this rule_group_id
+            $textAlignment = $settingData['text_alignment'] ?? 'center';
+            $imageAlignment = $settingData['image_alignment'] ?? 'center';
+
+            // Get all result_rule_texts for this rule_group_id (fresh from database)
             $resultRules = $form->resultRules()
                 ->where('rule_group_id', $ruleGroupId)
                 ->with('texts')
                 ->get();
 
+            \Log::info('Found rules for rule_group_id', [
+                'rule_group_id' => $ruleGroupId,
+                'rules_count' => $resultRules->count(),
+                'rule_ids' => $resultRules->pluck('id')->toArray(),
+            ]);
+
+            if ($resultRules->isEmpty()) {
+                \Log::warning('No rules found for rule_group_id', [
+                    'rule_group_id' => $ruleGroupId,
+                    'form_id' => $form->id,
+                    'all_rule_groups' => $form->resultRules()->distinct()->pluck('rule_group_id')->toArray(),
+                ]);
+                continue;
+            }
+
             // Create a map of temp_id or order to result_rule_text_id
             $textSettings = $settingData['text_settings'] ?? [];
+            if (empty($textSettings)) {
+                continue;
+            }
 
-            foreach ($resultRules as $rule) {
-                foreach ($rule->texts as $textIndex => $text) {
-                    // Try to match by order (since temp_id might not match exactly)
-                    $matchedSetting = null;
-                    foreach ($textSettings as $ts) {
-                        $tsOrder = $ts['order'] ?? 0;
-                        if ($tsOrder == $textIndex) {
-                            $matchedSetting = $ts;
-                            break;
-                        }
-                    }
+            // Collect all texts from all rules in this group, ordered by rule order then text order
+            $allTexts = [];
+            foreach ($resultRules->sortBy('order') as $rule) {
+                foreach ($rule->texts->sortBy('order') as $text) {
+                    $allTexts[] = $text;
+                }
+            }
 
-                    if ($matchedSetting) {
-                        ResultTextSetting::create([
-                            'result_rule_text_id' => $text->id,
-                            'title' => $matchedSetting['title'] ?? null,
-                            'image' => $this->processQuestionImage($matchedSetting['image'] ?? null, $form),
-                            'order' => $matchedSetting['order'] ?? $text->order ?? 0,
-                        ]);
-                    }
+            \Log::info('Matching texts with settings', [
+                'rule_group_id' => $ruleGroupId,
+                'all_texts_count' => count($allTexts),
+                'text_settings_count' => count($textSettings),
+                'all_texts' => array_map(function($t) {
+                    return ['id' => $t->id, 'order' => $t->order, 'text' => substr($t->result_text, 0, 50)];
+                }, $allTexts),
+                'text_settings' => $textSettings,
+            ]);
+
+            // Match by order first (most reliable when result_rule_text_id is null)
+            foreach ($textSettings as $settingIndex => $ts) {
+                if (!is_array($ts)) {
+                    continue;
+                }
+                
+                $textIndex = isset($ts['order']) ? (int) $ts['order'] : $settingIndex;
+                
+                // Find text by order position
+                if (isset($allTexts[$textIndex])) {
+                    $text = $allTexts[$textIndex];
+                    
+                    SettingResult::create([
+                        'form_id' => $form->id,
+                        'rule_group_id' => $ruleGroupId,
+                        'result_rule_text_id' => $text->id,
+                        'title' => $ts['title'] ?? null,
+                        'image' => $this->processQuestionImage($ts['image'] ?? null, $form),
+                        'image_alignment' => $imageAlignment,
+                        'text_alignment' => $textAlignment,
+                        'order' => $ts['order'] ?? $text->order ?? $textIndex,
+                    ]);
+                    
+                    \Log::info('Created SettingResult', [
+                        'form_id' => $form->id,
+                        'rule_group_id' => $ruleGroupId,
+                        'result_rule_text_id' => $text->id,
+                        'order' => $ts['order'] ?? $text->order ?? $textIndex,
+                    ]);
+                } else {
+                    \Log::warning('Text not found for setting', [
+                        'text_index' => $textIndex,
+                        'all_texts_count' => count($allTexts),
+                        'setting' => $ts,
+                    ]);
+                }
+            }
+            
+            // Also create settings for any texts that weren't matched (use default values)
+            foreach ($allTexts as $textIndex => $text) {
+                $alreadyMatched = SettingResult::where('form_id', $form->id)
+                    ->where('result_rule_text_id', $text->id)
+                    ->exists();
+                    
+                if (!$alreadyMatched) {
+                    SettingResult::create([
+                        'form_id' => $form->id,
+                        'rule_group_id' => $ruleGroupId,
+                        'result_rule_text_id' => $text->id,
+                        'title' => null,
+                        'image' => null,
+                        'image_alignment' => $imageAlignment,
+                        'text_alignment' => $textAlignment,
+                        'order' => $text->order ?? $textIndex,
+                    ]);
+                    
+                    \Log::info('Created SettingResult (default)', [
+                        'form_id' => $form->id,
+                        'rule_group_id' => $ruleGroupId,
+                        'result_rule_text_id' => $text->id,
+                    ]);
                 }
             }
         }

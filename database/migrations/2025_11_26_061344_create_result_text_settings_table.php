@@ -11,6 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Create original table structure (will be renamed in later migration)
         Schema::create('result_text_settings', function (Blueprint $table) {
             $table->id();
             $table->foreignId('result_rule_text_id')->constrained('result_rule_texts')->onDelete('cascade');

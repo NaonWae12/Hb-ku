@@ -215,6 +215,8 @@ function cloneResultTextItems(items = []) {
                     result_text: text,
                     title: null,
                     image: null,
+                    text_alignment: 'center',
+                    image_alignment: 'center',
                 };
             }
 
@@ -232,6 +234,8 @@ function cloneResultTextItems(items = []) {
                     result_text: text,
                     title: item.title || null,
                     image: item.image || item.image_url || null,
+                    text_alignment: item.text_alignment || 'center',
+                    image_alignment: item.image_alignment || 'center',
                 };
             }
 
@@ -1326,7 +1330,7 @@ function attachResultSettingEvents(card) {
         if (!ruleGroupId) {
             return [];
         }
-
+        
         const logResultTexts = (source, texts) => {
             if (!Array.isArray(texts)) {
                 return;
@@ -3484,6 +3488,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const savedRules = loadSavedRules();
             formData.saved_rules = savedRules;
             
+            // Debug: log result_text_settings
+            console.log('[FormBuilder] Saving form data:', {
+                result_text_settings_count: formData.result_text_settings?.length || 0,
+                result_text_settings: formData.result_text_settings,
+            });
+            
             fetch(saveFormUrl, {
                 method: saveFormMethod,
                 headers: {
@@ -4335,10 +4345,12 @@ function collectFormData() {
     resultSettingCards.forEach((card) => {
         const ruleSelect = card.querySelector('.result-setting-rule-select');
         const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
+        const imageAlignmentSelect = card.querySelector('.result-setting-image-alignment-select');
         
         const selectedOption = ruleSelect?.selectedOptions[0];
         const ruleGroupId = selectedOption ? selectedOption.getAttribute('data-rule-group-id') : null;
         const textAlignment = textAlignmentSelect ? textAlignmentSelect.value : 'center';
+        const imageAlignment = imageAlignmentSelect ? imageAlignmentSelect.value : 'center';
         
         if (ruleGroupId) {
             // Collect result text forms (each with title, image, and result_text)
@@ -4371,6 +4383,7 @@ function collectFormData() {
                 formData.result_text_settings.push({
                     rule_group_id: ruleGroupId,
                     text_alignment: textAlignment,
+                    image_alignment: imageAlignment,
                     text_settings: textSettings,
                 });
             }
@@ -4815,6 +4828,13 @@ function populateFormBuilder(data) {
                         textAlignmentSelect.value = setting.text_alignment;
                     }
                     textAlignmentSelect.dispatchEvent(new Event('change'));
+                }
+
+                if (alignmentSelect) {
+                    if (setting.image_alignment) {
+                        alignmentSelect.value = setting.image_alignment;
+                    }
+                    alignmentSelect.dispatchEvent(new Event('change'));
                 }
                 
                 // Pada halaman ini, gambar hanya bisa diunggah manual (tidak auto-fetch dari server).

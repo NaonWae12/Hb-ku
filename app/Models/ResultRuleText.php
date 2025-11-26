@@ -23,6 +23,6 @@ class ResultRuleText extends Model
 
     public function textSetting(): HasOne
     {
-        return $this->hasOne(ResultTextSetting::class);
+        return $this->hasOne(SettingResult::class);
     }
 }

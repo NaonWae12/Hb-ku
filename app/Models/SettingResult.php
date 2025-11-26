@@ -5,12 +5,18 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class ResultTextSetting extends Model
+class SettingResult extends Model
 {
+    protected $table = 'setting_results';
+    
     protected $fillable = [
+        'form_id',
+        'rule_group_id',
         'result_rule_text_id',
         'title',
         'image',
+        'image_alignment',
+        'text_alignment',
         'order',
     ];
 
@@ -18,9 +24,14 @@ class ResultTextSetting extends Model
         'order' => 'integer',
     ];
 
-    // Relationships
+    public function form(): BelongsTo
+    {
+        return $this->belongsTo(Form::class);
+    }
+
     public function resultRuleText(): BelongsTo
     {
         return $this->belongsTo(ResultRuleText::class);
     }
 }
+
