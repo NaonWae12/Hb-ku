@@ -115,7 +115,6 @@ class FormController extends Controller
                 'answer_templates' => $request->input('answer_templates', []),
                 'result_rules' => $request->input('result_rules', []),
                 'questions' => $request->input('questions', []),
-                'result_settings' => $request->input('result_settings', []),
                 'result_text_settings' => $request->input('result_text_settings', []),
             ]);
 
@@ -168,9 +167,6 @@ class FormController extends Controller
                         $textQuery->orderBy('order')->with('textSetting');
                     }])->orderBy('order');
             },
-            'resultSettings' => function ($query) {
-                $query->orderBy('order')->with('resultRule');
-            },
         ]);
 
         $formData = $this->prepareFormBuilderData($form);
@@ -212,6 +208,16 @@ class FormController extends Controller
         try {
             DB::beginTransaction();
 
+            $sectionsInput = $request->input('sections', []);
+            $answerTemplatesInput = $request->input('answer_templates', []);
+            $resultRulesInput = $request->input('result_rules', []);
+            $questionsInput = $request->input('questions', []);
+            $resultTextSettingsInput = $request->input('result_text_settings', []);
+
+            $hasRulePayload = $this->arrayHasContent($answerTemplatesInput)
+                || $this->arrayHasContent($resultRulesInput)
+                || $this->arrayHasContent($resultTextSettingsInput);
+
             $form->update([
                 'title' => $request->title,
                 'description' => $request->description,
@@ -222,20 +228,21 @@ class FormController extends Controller
                 'shuffle_questions' => $request->boolean('shuffle_questions'),
             ]);
 
-            // Hapus semua aturan form sebelum sinkronisasi ulang
-            $this->resetFormRules($form);
+            if ($hasRulePayload) {
+                // Hapus semua aturan form sebelum sinkronisasi ulang
+                $this->resetFormRules($form);
+            }
 
             // Hapus questions dan sections setelah menghapus dependencies
             $form->questions()->delete();
             $form->sections()->delete();
 
             $this->syncFormRelations($form, [
-                'sections' => $request->input('sections', []),
-                'answer_templates' => $request->input('answer_templates', []),
-                'result_rules' => $request->input('result_rules', []),
-                'questions' => $request->input('questions', []),
-                'result_settings' => $request->input('result_settings', []),
-                'result_text_settings' => $request->input('result_text_settings', []),
+                'sections' => $sectionsInput,
+                'answer_templates' => $answerTemplatesInput,
+                'result_rules' => $resultRulesInput,
+                'questions' => $questionsInput,
+                'result_text_settings' => $resultTextSettingsInput,
             ]);
 
             DB::commit();
@@ -819,7 +826,6 @@ class FormController extends Controller
             }
         }
 
-        $this->syncResultSettings($form, $payload, $resultRuleIdMap);
         $this->syncSettingResults($form, $payload);
     }
 
@@ -957,119 +963,42 @@ class FormController extends Controller
                 })->values()->toArray();
             });
 
-        // Get result settings from result_settings table (old structure)
-        $resultSettingsData = $form->resultSettings
-            ->sortBy('order')
-            ->values()
-            ->map(function ($setting) use ($resultRulesCollection, $ruleGroupTextSettings) {
-                // Get rule_group_id from result_rule
-                $ruleGroupId = null;
-                if ($setting->result_rule_id) {
-                    $rule = $resultRulesCollection->firstWhere('id', $setting->result_rule_id);
-                    if ($rule) {
-                        $ruleGroupId = $rule->rule_group_id;
-                    }
-                }
+        $ruleGroupsCollection = $form->ruleGroups()->get()->keyBy('rule_group_id');
 
-                return [
-                    'result_rule_id' => $setting->result_rule_id,
-                    'rule_group_id' => $ruleGroupId, // Add rule_group_id for frontend
-                    'title' => $setting->title,
-                    'image' => $setting->image,
-                    'image_alignment' => $setting->image_alignment ?? 'center',
-                    'result_text' => $setting->result_text,
-                    'text_alignment' => $setting->text_alignment ?? 'center',
-                    'image_url' => $setting->image ? asset($setting->image) : null,
-                    'text_settings' => $ruleGroupId
-                        ? ($ruleGroupTextSettings->get($ruleGroupId) ?? [])
-                        : [],
-                    'order' => $setting->order ?? 0,
-                ];
-            })->toArray();
-
-        // Map of rule_group_id => order from result_settings data
-        $ruleGroupOrderMap = [];
-        foreach ($resultSettingsData as $setting) {
-            $ruleGroupId = $setting['rule_group_id'] ?? null;
-            if ($ruleGroupId !== null) {
-                $ruleGroupOrderMap[$ruleGroupId] = $setting['order'] ?? 0;
-            }
-        }
-
-        // Get result settings from setting_results table (new structure)
-        // Group by rule_group_id to create one card per rule_group
-        $settingResultsData = SettingResult::where('form_id', $form->id)
-            ->whereNotNull('rule_group_id') // Only get settings with rule_group_id
+        // Build result setting cards data purely from setting_results table
+        $resultSettingsData = SettingResult::where('form_id', $form->id)
+            ->whereNotNull('rule_group_id')
+            ->orderBy('card_order')
             ->orderBy('order')
             ->get()
             ->groupBy('rule_group_id')
-            ->map(function ($settings, $ruleGroupId) use ($ruleGroupTextSettings) {
-                // Get text_settings for this rule_group_id
+            ->map(function ($settings, $ruleGroupId) use ($ruleGroupTextSettings, $ruleGroupsCollection) {
                 $textSettings = $ruleGroupTextSettings->get($ruleGroupId) ?? [];
-
-                // Get first setting for common properties (image, alignment, etc)
                 $firstSetting = $settings->first();
+                $ruleGroup = $ruleGroupsCollection->get($ruleGroupId);
 
                 return [
-                    'result_rule_id' => null, // New structure doesn't use result_rule_id
+                    'result_rule_id' => null,
                     'rule_group_id' => $ruleGroupId,
-                    'title' => null, // Title comes from rule_groups table
-                    'image' => null, // Image handled per text via text_settings
+                    'title' => $ruleGroup ? $ruleGroup->title : null,
+                    'image' => $firstSetting->card_image ?? null,
                     'image_alignment' => $firstSetting->image_alignment ?? 'center',
-                    'result_text' => null, // Not used in new structure
+                    'result_text' => null,
                     'text_alignment' => $firstSetting->text_alignment ?? 'center',
-                    'image_url' => null,
+                    'image_url' => $firstSetting && $firstSetting->card_image
+                        ? asset($firstSetting->card_image)
+                        : null,
                     'text_settings' => $textSettings,
-                    'order' => $ruleGroupOrderMap[$ruleGroupId]
-                        ?? ($firstSetting->card_order ?? $firstSetting->order ?? 0),
+                    'order' => $firstSetting->card_order ?? $firstSetting->order ?? 0,
                 ];
             })
             ->values()
             ->toArray();
 
-        // Merge both arrays, prioritizing setting_results (new structure)
-        // Remove duplicates based on rule_group_id
-        $mergedSettings = [];
-        $processedRuleGroupIds = [];
-
-        // First, add setting_results (new structure)
-        foreach ($settingResultsData as $setting) {
-            if (!empty($setting['rule_group_id']) && !in_array($setting['rule_group_id'], $processedRuleGroupIds)) {
-                $mergedSettings[] = $setting;
-                $processedRuleGroupIds[] = $setting['rule_group_id'];
-            }
-        }
-
-        // Then, add result_settings (old structure) that don't have rule_group_id or are not already processed
-        foreach ($resultSettingsData as $setting) {
-            $ruleGroupId = $setting['rule_group_id'] ?? null;
-            if (!$ruleGroupId || !in_array($ruleGroupId, $processedRuleGroupIds)) {
-                $mergedSettings[] = $setting;
-                if ($ruleGroupId) {
-                    $processedRuleGroupIds[] = $ruleGroupId;
-                }
-            }
-        }
-
-        // Sort by order
-        usort($mergedSettings, function ($a, $b) {
-            return ($a['order'] ?? 999) <=> ($b['order'] ?? 999);
-        });
-
-        $resultSettingsData = $mergedSettings;
-
         // Get rule_groups data for frontend
-        $ruleGroupsData = $form->ruleGroups()
-            ->get()
+        $ruleGroupsData = $ruleGroupsCollection
             ->map(function ($ruleGroup) {
-                return [
-                    'rule_group_id' => $ruleGroup->rule_group_id,
-                    'title' => $ruleGroup->title,
-                ];
-            })
-            ->keyBy('rule_group_id')
-            ->map(function ($item) {
-                return $item['title'];
+                return $ruleGroup->title;
             })
             ->toArray();
 
@@ -1269,7 +1198,6 @@ class FormController extends Controller
             })
             ->delete();
 
-        DB::table('result_settings')->where('form_id', $form->id)->delete();
         DB::table('answer_templates')->where('form_id', $form->id)->delete();
         DB::table('result_rules')->where('form_id', $form->id)->delete();
         DB::table('rule_groups')->where('form_id', $form->id)->delete();
@@ -1294,10 +1222,6 @@ class FormController extends Controller
             DB::table('result_rule_texts')
                 ->whereIn('result_rule_id', $ruleIds)
                 ->delete();
-
-            DB::table('result_settings')
-                ->whereIn('result_rule_id', $ruleIds)
-                ->delete();
         }
 
         $rulesQuery->delete();
@@ -1308,88 +1232,6 @@ class FormController extends Controller
             'template_order_base' => $templateOrderBase,
             'rule_order_base' => $ruleOrderBase,
         ];
-    }
-
-    private function syncResultSettings(Form $form, array $payload, array $resultRuleIdMap): void
-    {
-        $resultSettings = $payload['result_settings'] ?? [];
-
-        foreach ($resultSettings as $index => $settingData) {
-            if (!is_array($settingData)) {
-                continue;
-            }
-
-            $resultRuleId = null;
-
-            // Handle both old format (result_rule_index) and new format (rule_group_id)
-            if (isset($settingData['rule_group_id'])) {
-                // New format: get first result_rule_id from rule_group_id
-                $ruleGroupId = $settingData['rule_group_id'];
-                $firstRule = $form->resultRules()
-                    ->where('rule_group_id', $ruleGroupId)
-                    ->orderBy('order')
-                    ->first();
-                if ($firstRule) {
-                    $resultRuleId = $firstRule->id;
-                }
-            } elseif (isset($settingData['result_rule_index']) && array_key_exists($settingData['result_rule_index'], $resultRuleIdMap)) {
-                // Old format: use result_rule_index
-                $resultRuleId = $resultRuleIdMap[$settingData['result_rule_index']];
-            }
-
-            $resultText = $settingData['result_text'] ?? null;
-            if (!$resultText && $resultRuleId) {
-                $rule = $form->resultRules()->find($resultRuleId);
-                if ($rule && $rule->texts->isNotEmpty()) {
-                    $resultText = $rule->texts->first()->result_text;
-                }
-            }
-
-            // If no resultText and we have rule_group_id, collect all texts from all rules in the group
-            if (!$resultText && isset($settingData['rule_group_id'])) {
-                $ruleGroupId = $settingData['rule_group_id'];
-                $rules = $form->resultRules()
-                    ->where('rule_group_id', $ruleGroupId)
-                    ->with('texts')
-                    ->get();
-
-                $allTexts = [];
-                foreach ($rules as $rule) {
-                    foreach ($rule->texts as $text) {
-                        if ($text->result_text) {
-                            $allTexts[] = $text->result_text;
-                        }
-                    }
-                }
-                if (!empty($allTexts)) {
-                    $resultText = implode("\n\n", $allTexts);
-                }
-            }
-
-            // Get title from rule_groups
-            $title = null;
-            if (isset($settingData['rule_group_id'])) {
-                $ruleGroup = $form->ruleGroups()->where('rule_group_id', $settingData['rule_group_id'])->first();
-                $title = $ruleGroup ? $ruleGroup->title : null;
-            } elseif ($resultRuleId) {
-                $rule = $form->resultRules()->find($resultRuleId);
-                if ($rule && $rule->rule_group_id) {
-                    $ruleGroup = $form->ruleGroups()->where('rule_group_id', $rule->rule_group_id)->first();
-                    $title = $ruleGroup ? $ruleGroup->title : null;
-                }
-            }
-
-            $form->resultSettings()->create([
-                'form_id' => $form->id,
-                'result_rule_id' => $resultRuleId,
-                'title' => $title, // Get from rule_groups, not from input
-                'image' => $this->processQuestionImage($settingData['image'] ?? null, $form),
-                'image_alignment' => $settingData['image_alignment'] ?? 'center',
-                'result_text' => $resultText,
-                'text_alignment' => $settingData['text_alignment'] ?? 'center',
-                'order' => $settingData['order'] ?? $index,
-            ]);
-        }
     }
 
     /**
@@ -1412,7 +1254,7 @@ class FormController extends Controller
         $form->refresh();
         $form->load(['resultRules.texts']);
 
-        foreach ($resultTextSettings as $settingData) {
+        foreach ($resultTextSettings as $index => $settingData) {
             if (!is_array($settingData)) {
                 Log::warning('Invalid setting data (not array)', ['setting_data' => $settingData]);
                 continue;
@@ -1426,6 +1268,10 @@ class FormController extends Controller
 
             $textAlignment = $settingData['text_alignment'] ?? 'center';
             $imageAlignment = $settingData['image_alignment'] ?? 'center';
+            $cardOrder = isset($settingData['card_order'])
+                ? (int) $settingData['card_order']
+                : $index;
+            $cardImagePath = $this->processQuestionImage($settingData['card_image'] ?? null, $form);
 
             // Get all result_rule_texts for this rule_group_id (fresh from database)
             $resultRules = $form->resultRules()
@@ -1490,9 +1336,11 @@ class FormController extends Controller
                         'result_rule_text_id' => $text->id,
                         'title' => $ts['title'] ?? null,
                         'image' => $this->processQuestionImage($ts['image'] ?? null, $form),
+                        'card_image' => $cardImagePath,
                         'image_alignment' => $imageAlignment,
                         'text_alignment' => $textAlignment,
                         'order' => $ts['order'] ?? $text->order ?? $textIndex,
+                        'card_order' => $cardOrder,
                     ]);
 
                     Log::info('Created SettingResult', [
@@ -1523,9 +1371,11 @@ class FormController extends Controller
                         'result_rule_text_id' => $text->id,
                         'title' => null,
                         'image' => null,
+                        'card_image' => $cardImagePath,
                         'image_alignment' => $imageAlignment,
                         'text_alignment' => $textAlignment,
                         'order' => $text->order ?? $textIndex,
+                        'card_order' => $cardOrder,
                     ]);
 
                     Log::info('Created SettingResult (default)', [
@@ -1557,5 +1407,19 @@ class FormController extends Controller
         }, $data['result_rules'] ?? []);
 
         return $ruleGroupId;
+    }
+
+    private function arrayHasContent($value): bool
+    {
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                if ($this->arrayHasContent($item)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return !is_null($value) && $value !== '';
     }
 }

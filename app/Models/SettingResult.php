@@ -14,14 +14,17 @@ class SettingResult extends Model
         'rule_group_id',
         'result_rule_text_id',
         'title',
+        'card_image',
         'image',
         'image_alignment',
         'text_alignment',
         'order',
+        'card_order',
     ];
 
     protected $casts = [
         'order' => 'integer',
+        'card_order' => 'integer',
     ];
 
     public function form(): BelongsTo

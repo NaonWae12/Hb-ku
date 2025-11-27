@@ -4248,8 +4248,7 @@ function collectFormData() {
         questions: [],
         answer_templates: [],
         result_rules: [],
-        result_settings: [],
-        result_text_settings: [] // New structure for result text settings
+        result_text_settings: [] // Struktur baru untuk result text settings
     };
 
     // Collect sections
@@ -4508,30 +4507,18 @@ function collectFormData() {
                 }
             });
             
-            // Collect result setting data for result_settings array
-            const resultSettingData = {
+            const cardImageValue = imageValueInput && imageValueInput.value && imageValueInput.value.trim()
+                ? imageValueInput.value.trim()
+                : null;
+            
+            formData.result_text_settings.push({
                 rule_group_id: ruleGroupId,
                 text_alignment: textAlignment,
                 image_alignment: imageAlignment,
-                order: position, // Preserve actual position in container
-            };
-            
-            // Add image if exists
-            if (imageValueInput && imageValueInput.value && imageValueInput.value.trim()) {
-                resultSettingData.image = imageValueInput.value.trim();
-            }
-            
-            formData.result_settings.push(resultSettingData);
-            
-            // Collect result text settings
-            if (textSettings.length > 0) {
-                formData.result_text_settings.push({
-                    rule_group_id: ruleGroupId,
-                    text_alignment: textAlignment,
-                    image_alignment: imageAlignment,
-                    text_settings: textSettings,
-                });
-            }
+                card_order: position,
+                card_image: cardImageValue,
+                text_settings: textSettings,
+            });
         }
     });
 
