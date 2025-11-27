@@ -21,6 +21,19 @@ function setMetaContent(name, value) {
     }
 }
 
+function normalizeMediaUrl(src) {
+    if (!src) {
+        return '';
+    }
+
+    if (/^(https?:)?\/\//i.test(src) || src.startsWith('data:')) {
+        return src;
+    }
+
+    const trimmed = src.replace(/^\/+/, '');
+    return `${window.location.origin}/${trimmed}`;
+}
+
 function getAnswerTemplatesPlaceholder() {
     return '<div class="answer-templates-placeholder text-sm text-gray-500 italic">Belum ada template jawaban. Klik "Tambah Jawaban" untuk menambahkan.</div>';
 }
@@ -97,6 +110,7 @@ function setResultSettingTextValues(card, textData = []) {
                         const resultRuleTextId = item.result_rule_text_id || item.id || `text-${textIndex}`;
                         const title = item.title || '';
                         const image = item.image || item.image_url || '';
+                        const normalizedImage = normalizeMediaUrl(image);
                         const resultTextRaw = item.result_text ?? item.text ?? '';
                         const resultText = typeof resultTextRaw === 'string'
                             ? resultTextRaw
@@ -113,9 +127,9 @@ function setResultSettingTextValues(card, textData = []) {
                                 <!-- Image Upload -->
                                 <div class="mb-3">
                                     <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Gambar (opsional)</label>
-                                    <div class="result-text-form-image-area ${image ? '' : 'hidden'} mb-2">
+                                    <div class="result-text-form-image-area ${normalizedImage ? '' : 'hidden'} mb-2">
                                         <div class="relative inline-block">
-                                            <img src="${image}" alt="Text form image" class="result-text-form-image max-w-full h-auto rounded-lg border border-gray-200" style="max-height: 200px;">
+                                            <img src="${normalizedImage}" alt="Text form image" class="result-text-form-image max-w-full h-auto rounded-lg border border-gray-200" style="max-height: 200px;">
                                             <button type="button" class="remove-result-text-form-image-btn absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors" title="Hapus gambar">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -578,10 +592,11 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
             
             // Handle section image
             const existingImageSrc = sectionInfo?.image_url || sectionInfo?.image || '';
+            const normalizedSectionImageSrc = normalizeMediaUrl(existingImageSrc);
             const existingImagePath = sectionInfo?.image || '';
             
-            if (existingImageSrc && sectionImage && sectionImageArea) {
-                sectionImage.src = existingImageSrc;
+            if (normalizedSectionImageSrc && sectionImage && sectionImageArea) {
+                sectionImage.src = normalizedSectionImageSrc;
                 sectionImageArea.classList.remove('hidden');
                 sectionImageSettings?.classList.remove('hidden');
             }
@@ -614,7 +629,7 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
             attachSectionEvents(sectionDivider);
             
             // Apply image style after loading - trigger change event to apply style
-            if (existingImageSrc && sectionImage) {
+            if (normalizedSectionImageSrc && sectionImage) {
                 // Wait a bit for attachSectionEvents to finish setting up
                 setTimeout(() => {
                     // Trigger change events to apply style
@@ -659,11 +674,12 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
         const widthRange = questionCard.querySelector('.image-width-range');
         const widthDisplay = questionCard.querySelector('.image-width-display');
         const existingImageSrc = questionData.image_url || questionData.image || '';
+        const normalizedImageSrc = normalizeMediaUrl(existingImageSrc);
         const existingImagePath = questionData.image || '';
 
         // Set image display (use full URL for display)
-        if (existingImageSrc && questionImage && imageArea) {
-            questionImage.src = existingImageSrc;
+        if (normalizedImageSrc && questionImage && imageArea) {
+            questionImage.src = normalizedImageSrc;
             imageArea.classList.remove('hidden');
             imageSettings?.classList.remove('hidden');
         } else if (questionImage && imageArea) {
@@ -1192,11 +1208,22 @@ function createResultSettingCard() {
         }
     }
     
-    // Group active rules by rule_group_id and get unique titles
+    // PRIORITAS 1: Build options from initialData.rule_groups first (data dari database)
+    // Ini penting untuk memastikan semua rule_group_id yang ada di result_settings tersedia di dropdown
+    const allRuleGroups = new Map();
+    if (ruleGroupsData && Object.keys(ruleGroupsData).length > 0) {
+        Object.entries(ruleGroupsData).forEach(([ruleGroupId, title]) => {
+            if (ruleGroupId && title) {
+                allRuleGroups.set(ruleGroupId, title);
+            }
+        });
+    }
+    
+    // PRIORITAS 2: Group active rules by rule_group_id and get unique titles (dari DOM)
     const activeRuleGroups = new Map();
     resultRules.forEach((ruleCard) => {
         const ruleGroupId = ruleCard.getAttribute('data-rule-group-id');
-        if (ruleGroupId && !activeRuleGroups.has(ruleGroupId)) {
+        if (ruleGroupId && !activeRuleGroups.has(ruleGroupId) && !allRuleGroups.has(ruleGroupId)) {
             // Try to get title from rule_groups data first
             let title = ruleGroupsData[ruleGroupId] || null;
             
@@ -1223,27 +1250,32 @@ function createResultSettingCard() {
         }
     });
     
-    // Build options from active rule groups (only title, no duplicates)
-    let resultRuleOptions = '';
-    activeRuleGroups.forEach((title, ruleGroupId) => {
-        resultRuleOptions += `<option value="active-${ruleGroupId}" data-rule-type="active" data-rule-group-id="${ruleGroupId}">${title}</option>`;
-    });
-    
-    // Add saved rules options (only title, grouped by rule_group_id)
+    // PRIORITAS 3: Add saved rules options (only title, grouped by rule_group_id)
     const savedRuleGroups = new Map();
     savedRules.forEach((savedRule) => {
         const normalized = normalizeSavedRule(savedRule);
-        if (normalized.rule_group_id && !savedRuleGroups.has(normalized.rule_group_id)) {
+        if (normalized.rule_group_id && !savedRuleGroups.has(normalized.rule_group_id) && !allRuleGroups.has(normalized.rule_group_id)) {
             const ruleTitle = normalized.title || `Aturan Tersimpan ${savedRuleGroups.size + 1}`;
             savedRuleGroups.set(normalized.rule_group_id, ruleTitle);
         }
     });
     
+    // Build options: mulai dari initialData.rule_groups, lalu active rules, lalu saved rules
+    let resultRuleOptions = '';
+    
+    // Add from initialData.rule_groups (prioritas tertinggi - data dari database)
+    allRuleGroups.forEach((title, ruleGroupId) => {
+        resultRuleOptions += `<option value="active-${ruleGroupId}" data-rule-type="active" data-rule-group-id="${ruleGroupId}">${title}</option>`;
+    });
+    
+    // Add from active rule groups (dari DOM)
+    activeRuleGroups.forEach((title, ruleGroupId) => {
+        resultRuleOptions += `<option value="active-${ruleGroupId}" data-rule-type="active" data-rule-group-id="${ruleGroupId}">${title}</option>`;
+    });
+    
+    // Add from saved rules
     savedRuleGroups.forEach((title, ruleGroupId) => {
-        // Skip if already in active rule groups
-        if (!activeRuleGroups.has(ruleGroupId)) {
-            resultRuleOptions += `<option value="saved-${ruleGroupId}" data-rule-type="saved" data-rule-group-id="${ruleGroupId}">${title}</option>`;
-        }
+        resultRuleOptions += `<option value="saved-${ruleGroupId}" data-rule-type="saved" data-rule-group-id="${ruleGroupId}">${title}</option>`;
     });
     
     card.innerHTML = `
@@ -4425,12 +4457,24 @@ function collectFormData() {
         }
     });
     
-    // Collect result text settings (new structure)
-    const resultSettingCards = questionsContainer.querySelectorAll('.result-setting-card');
-    resultSettingCards.forEach((card) => {
+    // Collect result settings and result text settings (new structure)
+    // Get all items in order (questions, sections, result settings) to calculate correct position
+    const allItems = Array.from(questionsContainer.querySelectorAll('.question-card, .section-divider, .result-setting-card'));
+    
+    // Collect result setting cards with their position index
+    const resultSettingCards = [];
+    allItems.forEach((item, index) => {
+        if (item.classList.contains('result-setting-card')) {
+            resultSettingCards.push({ card: item, position: index });
+        }
+    });
+    
+    // Process each result setting card
+    resultSettingCards.forEach(({ card, position }) => {
         const ruleSelect = card.querySelector('.result-setting-rule-select');
         const textAlignmentSelect = card.querySelector('.result-setting-text-alignment-select');
         const imageAlignmentSelect = card.querySelector('.result-setting-image-alignment-select');
+        const imageValueInput = card.querySelector('.result-setting-image-value');
         
         const selectedOption = ruleSelect?.selectedOptions[0];
         const ruleGroupId = selectedOption ? selectedOption.getAttribute('data-rule-group-id') : null;
@@ -4464,6 +4508,22 @@ function collectFormData() {
                 }
             });
             
+            // Collect result setting data for result_settings array
+            const resultSettingData = {
+                rule_group_id: ruleGroupId,
+                text_alignment: textAlignment,
+                image_alignment: imageAlignment,
+                order: position, // Preserve actual position in container
+            };
+            
+            // Add image if exists
+            if (imageValueInput && imageValueInput.value && imageValueInput.value.trim()) {
+                resultSettingData.image = imageValueInput.value.trim();
+            }
+            
+            formData.result_settings.push(resultSettingData);
+            
+            // Collect result text settings
             if (textSettings.length > 0) {
                 formData.result_text_settings.push({
                     rule_group_id: ruleGroupId,
@@ -4895,12 +4955,58 @@ function populateFormBuilder(data) {
                 attachQuestionCardEvents(defaultQuestion);
             }
             
-            // Load result settings
+            // Load result settings - insert at correct position based on order
             const resultSettings = Array.isArray(data.result_settings) ? data.result_settings : [];
-            resultSettings.forEach((setting) => {
+            
+            console.log('[populateFormBuilder] Result settings data:', {
+                hasResultSettings: !!data.result_settings,
+                resultSettingsCount: resultSettings.length,
+                resultSettings: resultSettings,
+            });
+            
+            // Sort result settings by order to ensure correct sequence
+            const sortedResultSettings = resultSettings.slice().sort((a, b) => {
+                const orderA = a.order !== undefined ? a.order : 999;
+                const orderB = b.order !== undefined ? b.order : 999;
+                return orderA - orderB;
+            });
+            
+            console.log('[populateFormBuilder] Processing result settings:', {
+                sortedCount: sortedResultSettings.length,
+                totalItems: questionsContainer.children.length,
+            });
+            
+            sortedResultSettings.forEach((setting, index) => {
+                console.log('[populateFormBuilder] Processing result setting:', {
+                    index,
+                    setting,
+                    rule_group_id: setting.rule_group_id,
+                    result_rule_id: setting.result_rule_id,
+                });
                 const resultSettingCard = createResultSettingCard();
-                questionsContainer.appendChild(resultSettingCard);
                 attachResultSettingEvents(resultSettingCard);
+                
+                // Determine insertion position based on order
+                // If order is within range of current items, insert at that position
+                // Otherwise, append at the end
+                const currentItems = Array.from(questionsContainer.children);
+                const totalItems = currentItems.length;
+                const targetOrder = setting.order !== undefined ? setting.order : totalItems + index;
+                let insertPosition = null;
+                
+                if (targetOrder < totalItems) {
+                    // Insert at specific position
+                    const targetItem = currentItems[targetOrder];
+                    if (targetItem) {
+                        questionsContainer.insertBefore(resultSettingCard, targetItem);
+                        insertPosition = 'inserted';
+                    }
+                }
+                
+                // If not inserted yet, append at the end
+                if (!insertPosition) {
+                    questionsContainer.appendChild(resultSettingCard);
+                }
                 
                 // Populate data
                 const ruleSelect = resultSettingCard.querySelector('.result-setting-rule-select');
@@ -4926,16 +5032,38 @@ function populateFormBuilder(data) {
                 }
                 
                 // Set selected option based on rule_group_id
-                if (ruleGroupId && ruleSelect) {
-                    // Find option with matching rule_group_id
-                    const options = Array.from(ruleSelect.options);
-                    const matchingOption = options.find(opt => opt.getAttribute('data-rule-group-id') === ruleGroupId);
-                    if (matchingOption) {
-                        ruleSelect.value = matchingOption.value;
-                        // Trigger change event to load texts from rules (will get all texts from all rules in group)
-                        ruleSelect.dispatchEvent(new Event('change'));
+                // Use setTimeout to ensure dropdown options are fully rendered
+                setTimeout(() => {
+                    if (ruleGroupId && ruleSelect) {
+                        // Find option with matching rule_group_id
+                        const options = Array.from(ruleSelect.options);
+                        const matchingOption = options.find(opt => opt.getAttribute('data-rule-group-id') === ruleGroupId);
+                        console.log('[populateFormBuilder] Setting rule select:', {
+                            ruleGroupId,
+                            optionsCount: options.length,
+                            matchingOption: !!matchingOption,
+                            allOptions: options.map(opt => ({
+                                value: opt.value,
+                                ruleGroupId: opt.getAttribute('data-rule-group-id'),
+                                text: opt.textContent,
+                            })),
+                        });
+                        if (matchingOption) {
+                            ruleSelect.value = matchingOption.value;
+                            // Trigger change event to load texts from rules (will get all texts from all rules in group)
+                            ruleSelect.dispatchEvent(new Event('change'));
+                        } else {
+                            console.warn('[populateFormBuilder] No matching option found for rule_group_id:', ruleGroupId, {
+                                availableRuleGroupIds: options.map(opt => opt.getAttribute('data-rule-group-id')).filter(Boolean),
+                            });
+                        }
+                    } else {
+                        console.warn('[populateFormBuilder] Missing ruleGroupId or ruleSelect:', {
+                            ruleGroupId,
+                            hasRuleSelect: !!ruleSelect,
+                        });
                     }
-                }
+                }, 100); // Small delay to ensure DOM is ready
                 
                 // Apply saved text settings (title, image per text) if available
                 if (Array.isArray(setting.text_settings) && setting.text_settings.length) {
@@ -4943,20 +5071,35 @@ function populateFormBuilder(data) {
                     setResultSettingTextValues(resultSettingCard, setting.text_settings);
                 } else {
                     // Fallback: use saved result_text (legacy format)
-                const savedTexts = setting.result_text
-                    ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
-                    : [];
-                const fallbackTextObjects = savedTexts.map((text, index) => ({
-                    result_rule_text_id: `legacy-${ruleGroupId || 'unknown'}-${index}`,
-                    result_text: text,
-                    title: null,
-                    image: null,
-                }));
-                updateRuleGroupTextLookup(ruleGroupId, fallbackTextObjects);
-                setResultSettingTextValues(resultSettingCard, fallbackTextObjects);
+                    const savedTexts = setting.result_text
+                        ? setting.result_text.split(/\n{2,}/).map(text => text.trim()).filter(Boolean)
+                        : [];
+                    const fallbackTextObjects = savedTexts.map((text, index) => ({
+                        result_rule_text_id: `legacy-${ruleGroupId || 'unknown'}-${index}`,
+                        result_text: text,
+                        title: null,
+                        image: null,
+                    }));
+                    updateRuleGroupTextLookup(ruleGroupId, fallbackTextObjects);
+                    setResultSettingTextValues(resultSettingCard, fallbackTextObjects);
                 }
                 
-                // Title removed - now using title from rule_groups
+                // Populate image if exists
+                if (setting.image || setting.image_url) {
+                    const imageUrl = setting.image_url || setting.image;
+                    if (imageValueInput) {
+                        imageValueInput.value = imageUrl;
+                    }
+                    if (resultImage) {
+                        resultImage.src = imageUrl;
+                    }
+                    if (imageArea) {
+                        imageArea.classList.remove('hidden');
+                    }
+                    if (imageSettings) {
+                        imageSettings.classList.remove('hidden');
+                    }
+                }
                 
                 if (textAlignmentSelect) {
                     if (setting.text_alignment) {
@@ -4971,9 +5114,6 @@ function populateFormBuilder(data) {
                     }
                     alignmentSelect.dispatchEvent(new Event('change'));
                 }
-                
-                // Pada halaman ini, gambar hanya bisa diunggah manual (tidak auto-fetch dari server).
-                // Jadi kita biarkan preview kosong meskipun backend punya path gambar.
             });
             
             updateSectionNumbers();

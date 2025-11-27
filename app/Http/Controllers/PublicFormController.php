@@ -9,6 +9,8 @@ use App\Models\SettingResult;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class PublicFormController extends Controller
@@ -229,12 +231,22 @@ class PublicFormController extends Controller
             'sections.questions.options.answerTemplate',
             'questions.options.answerTemplate',
             'resultRules.texts.textSetting',
+            'answerTemplates' => function ($query) {
+                $query->orderBy('order');
+            },
         ]);
 
         $allQuestions = collect($form->questions)
             ->concat($form->sections->flatMap->questions)
             ->unique('id')
             ->values();
+
+        $answerTemplateScoreMap = $form->answerTemplates
+            ->mapWithKeys(function ($template) {
+                $key = Str::lower(trim($template->answer_text ?? ''));
+                return $key !== '' ? [$key => $template->score] : [];
+            })
+            ->toArray();
 
         $rules = [];
         $messages = [];
@@ -263,7 +275,7 @@ class PublicFormController extends Controller
         $totalScore = 0;
         $finalResultData = null;
 
-        DB::transaction(function () use ($form, $validated, $answers, &$totalScore, &$finalResultData, $request, $allQuestions) {
+        DB::transaction(function () use ($form, $validated, $answers, &$totalScore, &$finalResultData, $request, $allQuestions, $answerTemplateScoreMap) {
             $formResponse = FormResponse::create([
                 'form_id' => $form->id,
                 'email' => $validated['email'] ?? null,
@@ -289,8 +301,22 @@ class PublicFormController extends Controller
                             continue;
                         }
 
-                        $score = optional($option->answerTemplate)->score ?? 0;
+                        $score = optional($option->answerTemplate)->score;
+                        $scoreSource = $score !== null ? 'template' : null;
+                        if ($score === null) {
+                            $score = $this->resolveOptionScoreFallback($option->text, $answerTemplateScoreMap);
+                            $scoreSource = $score !== null ? 'fallback' : null;
+                        }
+                        $score = $score ?? 0;
                         $totalScore += $score;
+                        Log::info('Scoring checkbox answer', [
+                            'form_id' => $form->id,
+                            'question_id' => $question->id,
+                            'option_id' => $option->id,
+                            'score_added' => $score,
+                            'running_total' => $totalScore,
+                            'score_source' => $scoreSource ?? 'default_zero',
+                        ]);
 
                         ResponseAnswer::create([
                             'form_response_id' => $formResponse->id,
@@ -306,8 +332,22 @@ class PublicFormController extends Controller
                         continue;
                     }
 
-                    $score = optional($option->answerTemplate)->score ?? 0;
+                    $score = optional($option->answerTemplate)->score;
+                    $scoreSource = $score !== null ? 'template' : null;
+                    if ($score === null) {
+                        $score = $this->resolveOptionScoreFallback($option->text, $answerTemplateScoreMap);
+                        $scoreSource = $score !== null ? 'fallback' : null;
+                    }
+                    $score = $score ?? 0;
                     $totalScore += $score;
+                    Log::info('Scoring single choice answer', [
+                        'form_id' => $form->id,
+                        'question_id' => $question->id,
+                        'option_id' => $option->id,
+                        'score_added' => $score,
+                        'running_total' => $totalScore,
+                        'score_source' => $scoreSource ?? 'default_zero',
+                    ]);
 
                     ResponseAnswer::create([
                         'form_response_id' => $formResponse->id,
@@ -328,6 +368,11 @@ class PublicFormController extends Controller
             }
 
             $resultData = $this->resolveResultText($form, $totalScore);
+            Log::info('Resolved result data for respondent', [
+                'form_id' => $form->id,
+                'total_score' => $totalScore,
+                'result_data' => $resultData,
+            ]);
             $finalResultData = $resultData;
 
             // Store plain text for backward compatibility
@@ -383,6 +428,10 @@ class PublicFormController extends Controller
             });
 
         if (! $matchingRule) {
+            Log::warning('No matching result rule found', [
+                'form_id' => $form->id,
+                'total_score' => $totalScore,
+            ]);
             return null;
         }
 
@@ -439,5 +488,19 @@ class PublicFormController extends Controller
             'image_alignment' => $imageAlignment,
             'texts' => $texts,
         ];
+    }
+
+    private function resolveOptionScoreFallback(?string $optionText, array $scoreMap): ?int
+    {
+        if ($optionText === null) {
+            return null;
+        }
+
+        $key = Str::lower(trim($optionText));
+        if ($key === '') {
+            return null;
+        }
+
+        return $scoreMap[$key] ?? null;
     }
 }

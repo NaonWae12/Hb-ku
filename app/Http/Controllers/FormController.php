@@ -169,7 +169,7 @@ class FormController extends Controller
                     }])->orderBy('order');
             },
             'resultSettings' => function ($query) {
-                $query->orderBy('order');
+                $query->orderBy('order')->with('resultRule');
             },
         ]);
 
@@ -957,6 +957,7 @@ class FormController extends Controller
                 })->values()->toArray();
             });
 
+        // Get result settings from result_settings table (old structure)
         $resultSettingsData = $form->resultSettings
             ->sortBy('order')
             ->values()
@@ -982,8 +983,80 @@ class FormController extends Controller
                     'text_settings' => $ruleGroupId
                         ? ($ruleGroupTextSettings->get($ruleGroupId) ?? [])
                         : [],
+                    'order' => $setting->order ?? 0,
                 ];
             })->toArray();
+
+        // Map of rule_group_id => order from result_settings data
+        $ruleGroupOrderMap = [];
+        foreach ($resultSettingsData as $setting) {
+            $ruleGroupId = $setting['rule_group_id'] ?? null;
+            if ($ruleGroupId !== null) {
+                $ruleGroupOrderMap[$ruleGroupId] = $setting['order'] ?? 0;
+            }
+        }
+
+        // Get result settings from setting_results table (new structure)
+        // Group by rule_group_id to create one card per rule_group
+        $settingResultsData = SettingResult::where('form_id', $form->id)
+            ->whereNotNull('rule_group_id') // Only get settings with rule_group_id
+            ->orderBy('order')
+            ->get()
+            ->groupBy('rule_group_id')
+            ->map(function ($settings, $ruleGroupId) use ($ruleGroupTextSettings) {
+                // Get text_settings for this rule_group_id
+                $textSettings = $ruleGroupTextSettings->get($ruleGroupId) ?? [];
+
+                // Get first setting for common properties (image, alignment, etc)
+                $firstSetting = $settings->first();
+
+                return [
+                    'result_rule_id' => null, // New structure doesn't use result_rule_id
+                    'rule_group_id' => $ruleGroupId,
+                    'title' => null, // Title comes from rule_groups table
+                    'image' => null, // Image handled per text via text_settings
+                    'image_alignment' => $firstSetting->image_alignment ?? 'center',
+                    'result_text' => null, // Not used in new structure
+                    'text_alignment' => $firstSetting->text_alignment ?? 'center',
+                    'image_url' => null,
+                    'text_settings' => $textSettings,
+                    'order' => $ruleGroupOrderMap[$ruleGroupId]
+                        ?? ($firstSetting->card_order ?? $firstSetting->order ?? 0),
+                ];
+            })
+            ->values()
+            ->toArray();
+
+        // Merge both arrays, prioritizing setting_results (new structure)
+        // Remove duplicates based on rule_group_id
+        $mergedSettings = [];
+        $processedRuleGroupIds = [];
+
+        // First, add setting_results (new structure)
+        foreach ($settingResultsData as $setting) {
+            if (!empty($setting['rule_group_id']) && !in_array($setting['rule_group_id'], $processedRuleGroupIds)) {
+                $mergedSettings[] = $setting;
+                $processedRuleGroupIds[] = $setting['rule_group_id'];
+            }
+        }
+
+        // Then, add result_settings (old structure) that don't have rule_group_id or are not already processed
+        foreach ($resultSettingsData as $setting) {
+            $ruleGroupId = $setting['rule_group_id'] ?? null;
+            if (!$ruleGroupId || !in_array($ruleGroupId, $processedRuleGroupIds)) {
+                $mergedSettings[] = $setting;
+                if ($ruleGroupId) {
+                    $processedRuleGroupIds[] = $ruleGroupId;
+                }
+            }
+        }
+
+        // Sort by order
+        usort($mergedSettings, function ($a, $b) {
+            return ($a['order'] ?? 999) <=> ($b['order'] ?? 999);
+        });
+
+        $resultSettingsData = $mergedSettings;
 
         // Get rule_groups data for frontend
         $ruleGroupsData = $form->ruleGroups()
@@ -1314,7 +1387,7 @@ class FormController extends Controller
                 'image_alignment' => $settingData['image_alignment'] ?? 'center',
                 'result_text' => $resultText,
                 'text_alignment' => $settingData['text_alignment'] ?? 'center',
-                'order' => $index,
+                'order' => $settingData['order'] ?? $index,
             ]);
         }
     }

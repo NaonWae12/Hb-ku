@@ -206,12 +206,20 @@
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const form = document.getElementById('public-form');
+            if (!form) {
+                return;
+            }
+
             const pages = document.querySelectorAll('.form-page');
             const prevBtn = document.getElementById('prev-page-btn');
             const nextBtn = document.getElementById('next-page-btn');
             const submitBtn = document.getElementById('submit-btn');
             const currentPageSpan = document.getElementById('current-page');
             const totalPagesSpan = document.getElementById('total-pages');
+
+            if (!pages.length || !prevBtn || !nextBtn || !submitBtn || !currentPageSpan || !totalPagesSpan) {
+                return;
+            }
 
             let currentPage = 0;
             const totalPages = pages.length;
