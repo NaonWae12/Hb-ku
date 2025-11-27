@@ -1305,11 +1305,16 @@ function createResultSettingCard() {
                 <!-- Text Alignment -->
                 <div class="mt-4">
                     <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">Posisi teks</label>
-                    <select class="result-setting-text-alignment-select text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
-                        <option value="left">Kiri</option>
-                        <option value="center" selected>Tengah</option>
-                        <option value="right">Kanan</option>
-                    </select>
+                    <div class="flex items-center space-x-3">
+                        <select class="result-setting-text-alignment-select flex-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                            <option value="left">Kiri</option>
+                            <option value="center" selected>Tengah</option>
+                            <option value="right">Kanan</option>
+                        </select>
+                        <button type="button" class="add-new-result-setting-btn px-3 py-1.5 text-xs font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-50 transition-colors">
+                            Tambah
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -1590,6 +1595,31 @@ function attachResultSettingEvents(card) {
     if (deleteBtn) {
         deleteBtn.addEventListener('click', function() {
             card.remove();
+        });
+    }
+    
+    // Add new result setting card
+    const addNewBtn = card.querySelector('.add-new-result-setting-btn');
+    if (addNewBtn) {
+        addNewBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const questionsContainer = document.getElementById('questions-container');
+            if (questionsContainer) {
+                const newResultSettingCard = createResultSettingCard();
+                attachResultSettingEvents(newResultSettingCard);
+                
+                // Insert after current card
+                if (card.nextSibling) {
+                    questionsContainer.insertBefore(newResultSettingCard, card.nextSibling);
+                } else {
+                    questionsContainer.appendChild(newResultSettingCard);
+                }
+                
+                updateMainButtonsVisibility();
+                
+                // Scroll to the new card
+                newResultSettingCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
         });
     }
 }
@@ -3288,9 +3318,32 @@ document.addEventListener('DOMContentLoaded', function() {
     updateShareButtonVisibility();
 
     if (shareLinkBtn) {
-        shareLinkBtn.addEventListener('click', function() {
+        shareLinkBtn.addEventListener('click', async function() {
             if (shareLinkUrl) {
-                openShareModal(shareLinkUrl);
+                // Langsung copy link ke clipboard saat tombol diklik
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(shareLinkUrl);
+                    } else {
+                        // Fallback untuk browser lama
+                        const textArea = document.createElement('textarea');
+                        textArea.value = shareLinkUrl;
+                        textArea.style.position = 'fixed';
+                        textArea.style.left = '-999999px';
+                        textArea.style.top = '-999999px';
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        document.execCommand('copy');
+                        textArea.remove();
+                    }
+                    // Tampilkan dialog informasi bahwa link sudah disalin
+                    openShareModal(shareLinkUrl);
+                } catch (error) {
+                    console.error('Failed to copy link:', error);
+                    // Jika gagal copy, tampilkan dialog dengan tombol salin manual
+                    openShareModal(shareLinkUrl, true);
+                }
             }
         });
     }
@@ -3739,37 +3792,6 @@ function attachQuestionCardEvents(card) {
     const quickAddSectionBtn = card.querySelector('.quick-add-section-btn');
     const quickAddResultSettingBtn = card.querySelector('.quick-add-result-setting-btn');
     
-    // Check if form has result rules
-    // Floating button for adding result setting
-    const floatingAddResultSettingBtn = document.getElementById('floating-add-result-setting-btn');
-    const updateFloatingButtonVisibility = () => {
-        if (floatingAddResultSettingBtn) {
-            if (hasResultRules()) {
-                floatingAddResultSettingBtn.classList.remove('hidden');
-                floatingAddResultSettingBtn.classList.add('flex');
-            } else {
-                floatingAddResultSettingBtn.classList.add('hidden');
-                floatingAddResultSettingBtn.classList.remove('flex');
-            }
-        }
-    };
-
-    if (floatingAddResultSettingBtn) {
-        floatingAddResultSettingBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const questionsContainer = document.getElementById('questions-container');
-            if (questionsContainer) {
-                const resultSettingCard = createResultSettingCard();
-                questionsContainer.appendChild(resultSettingCard);
-                attachResultSettingEvents(resultSettingCard);
-                updateMainButtonsVisibility();
-                
-                // Scroll to the new card
-                resultSettingCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-        });
-    }
-
     const hasResultRules = () => {
         const resultRulesContainer = document.getElementById('result-rules-container');
         if (!resultRulesContainer) return false;
@@ -3793,8 +3815,6 @@ function attachQuestionCardEvents(card) {
                 }
             }
         }
-        // Update floating button visibility
-        updateFloatingButtonVisibility();
     };
     
     const hideQuickAddButtons = () => {
@@ -3826,7 +3846,8 @@ function attachQuestionCardEvents(card) {
         });
     }
 
-    if (quickAddResultSettingBtn) {
+    if (quickAddResultSettingBtn && !quickAddResultSettingBtn.hasAttribute('data-listener')) {
+        quickAddResultSettingBtn.setAttribute('data-listener', 'true');
         quickAddResultSettingBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             const questionsContainer = document.getElementById('questions-container');
@@ -4502,70 +4523,120 @@ function showSuccessDialog(message) {
     }, 3000);
 }
 
-function openShareModal(link) {
+function openShareModal(link, showManualCopy = false) {
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4';
-    modal.innerHTML = `
-        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">Bagikan Formulir</h3>
-            <p class="text-sm text-gray-600 mb-4">Salin tautan berikut dan bagikan kepada responden Anda.</p>
-            <div class="flex items-center space-x-2">
-                <input type="text" readonly class="share-link-input flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none" value="">
-                <button type="button" data-share-copy class="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg">Salin</button>
+    
+    // Jika showManualCopy true, tampilkan dialog dengan tombol salin manual (fallback)
+    if (showManualCopy) {
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Bagikan Formulir</h3>
+                <p class="text-sm text-gray-600 mb-4">Salin tautan berikut dan bagikan kepada responden Anda.</p>
+                <div class="flex items-center space-x-2">
+                    <input type="text" readonly class="share-link-input flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none" value="${link}">
+                    <button type="button" data-share-copy class="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg">Salin</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Tautan ini akan membawa responden ke halaman pengisian form.</p>
+                <div class="flex justify-end mt-6">
+                    <button type="button" data-share-close class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-red-600">Tutup</button>
+                </div>
             </div>
-            <p class="text-xs text-gray-500 mt-2">Tautan ini akan membawa responden ke halaman pengisian form.</p>
-            <div class="flex justify-end mt-6">
-                <button type="button" data-share-close class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-red-600">Tutup</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const input = modal.querySelector('.share-link-input');
-    if (input) {
-        input.value = link;
-        input.focus();
-        input.select();
-    }
-
-    const closeModal = () => {
-        modal.remove();
-    };
-
-    modal.addEventListener('click', (event) => {
-        if (event.target === modal) {
-            closeModal();
+        `;
+        
+        document.body.appendChild(modal);
+        
+        const input = modal.querySelector('.share-link-input');
+        if (input) {
+            input.focus();
+            input.select();
         }
-    });
-
-    const closeBtn = modal.querySelector('[data-share-close]');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', closeModal);
-    }
-
-    const copyBtn = modal.querySelector('[data-share-copy]');
-    if (copyBtn) {
-        copyBtn.addEventListener('click', async () => {
-            try {
-                if (navigator.clipboard?.writeText) {
-                    await navigator.clipboard.writeText(link);
-                } else if (input) {
-                    input.select();
-                    document.execCommand('copy');
-                }
-                copyBtn.textContent = 'Disalin!';
-                copyBtn.classList.remove('bg-red-600');
-                copyBtn.classList.add('bg-green-600');
-                setTimeout(() => {
-                    copyBtn.textContent = 'Salin';
-                    copyBtn.classList.remove('bg-green-600');
-                    copyBtn.classList.add('bg-red-600');
-                }, 1500);
-            } catch (error) {
-                alert('Gagal menyalin tautan. Silakan salin secara manual.');
+        
+        const closeModal = () => {
+            modal.remove();
+        };
+        
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeModal();
             }
         });
+        
+        const closeBtn = modal.querySelector('[data-share-close]');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeModal);
+        }
+        
+        const copyBtn = modal.querySelector('[data-share-copy]');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', async () => {
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(link);
+                    } else if (input) {
+                        input.select();
+                        document.execCommand('copy');
+                    }
+                    copyBtn.textContent = 'Disalin!';
+                    copyBtn.classList.remove('bg-red-600');
+                    copyBtn.classList.add('bg-green-600');
+                    setTimeout(() => {
+                        copyBtn.textContent = 'Salin';
+                        copyBtn.classList.remove('bg-green-600');
+                        copyBtn.classList.add('bg-red-600');
+                    }, 1500);
+                } catch (error) {
+                    alert('Gagal menyalin tautan. Silakan salin secara manual.');
+                }
+            });
+        }
+    } else {
+        // Dialog informasi sukses (link sudah disalin)
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                <div class="flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mx-auto mb-4">
+                    <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                </div>
+                <h3 class="text-xl font-semibold text-gray-900 text-center mb-2">Link Disalin!</h3>
+                <p class="text-sm text-gray-600 text-center mb-4">Tautan formulir sudah disalin ke clipboard.</p>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+                    <p class="text-xs text-gray-500 mb-1">Tautan:</p>
+                    <p class="text-sm text-gray-700 break-all font-mono">${link}</p>
+                </div>
+                <p class="text-xs text-gray-500 text-center mb-6">Bagikan tautan ini kepada responden Anda.</p>
+                <div class="flex justify-center">
+                    <button id="close-share-modal" class="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+                        Tutup
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        const closeModal = () => {
+            modal.remove();
+        };
+        
+        const closeBtn = modal.querySelector('#close-share-modal');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeModal);
+        }
+        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+        
+        // Auto close after 3 seconds
+        setTimeout(() => {
+            if (document.body.contains(modal)) {
+                closeModal();
+            }
+        }, 3000);
     }
 }
 
