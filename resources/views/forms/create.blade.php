@@ -32,6 +32,15 @@ $responsesStats = $responsesStats ?? [
 
                 <!-- Action Buttons -->
                 <div class="flex items-center space-x-3">
+                    <!-- Header Setup Button (only visible in questions tab) -->
+                    <button id="header-setup-btn" type="button"
+                        class="header-setup-btn flex items-center space-x-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors hidden">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                        <span class="text-sm font-medium">Header</span>
+                    </button>
+
                     <!-- Share Link Button -->
                     <button id="share-link-btn" type="button"
                         class="flex items-center space-x-2 px-4 py-2 bg-white border border-red-600 text-red-600 rounded-lg hover:bg-red-50 transition-colors {{ $shareUrl ? '' : 'hidden' }}">
@@ -56,16 +65,161 @@ $responsesStats = $responsesStats ?? [
     <!-- Tab Bar -->
     <div class="bg-white border-b border-gray-200 sticky top-16 z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex space-x-8">
-                <button class="tab-btn active px-4 py-3 text-sm font-medium text-red-600 border-b-2 border-red-600 transition-colors" data-tab="questions">
-                    Pertanyaan
-                </button>
-                <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="responses">
-                    Jawaban
-                </button>
-                <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="settings">
-                    Setelan
-                </button>
+            <div class="flex items-center justify-between">
+                <!-- Tab Buttons -->
+                <div class="flex space-x-8">
+                    <button class="tab-btn active px-4 py-3 text-sm font-medium text-red-600 border-b-2 border-red-600 transition-colors" data-tab="questions">
+                        Pertanyaan
+                    </button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="responses">
+                        Jawaban
+                    </button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="settings">
+                        Setelan
+                    </button>
+                </div>
+                
+                <!-- Card Formatting Toolbar (appears when card is active) -->
+                <div id="card-formatting-toolbar" class="flex items-center space-x-1 opacity-0 pointer-events-none transition-opacity duration-200 bg-gray-50 rounded-lg px-2 py-1">
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Text Alignment -->
+                    <div class="relative group">
+                        <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Perataan Teks" data-tool="text-align">
+                            <svg id="text-align-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8M4 18h8"></path>
+                            </svg>
+                        </button>
+                        <div class="card-toolbar-dropdown hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1 z-50 min-w-[160px]">
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="left">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8M4 18h8"></path>
+                                </svg>
+                                <span>Rata Kiri</span>
+                            </button>
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6h12M4 10h16M6 14h12M4 18h16"></path>
+                                </svg>
+                                <span>Rata Tengah</span>
+                            </button>
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="right">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25" />
+                                </svg>
+                                <span>Rata Kanan</span>
+                            </button>
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="justify">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+                                </svg>
+                                <span>Rata Kiri Kanan</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Font Family -->
+                    <div class="relative group">
+                        <button class="card-toolbar-btn px-3 py-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors text-sm font-medium" title="Font" data-tool="font-family">
+                            <span class="font-family-display">Arial</span>
+                            <svg class="w-4 h-4 inline-block ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        <div class="card-toolbar-dropdown hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[220px] max-h-[300px] overflow-y-auto">
+                            <input type="text" id="font-family-search-input" placeholder="Cari font..." class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg mb-2 focus:outline-none focus:ring-1 focus:ring-red-500 relative z-10">
+                            <div id="font-family-list" class="space-y-1">
+                                <!-- Font options will be loaded dynamically from Google Fonts -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Font Size (Manual Input + Template) -->
+                    <div class="flex items-center space-x-1">
+                        <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Kurangi Ukuran" data-action="decrease-size">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+                            </svg>
+                        </button>
+                        <div class="relative group">
+                            <button class="card-toolbar-btn px-2 py-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors text-sm font-medium min-w-[50px]" title="Ukuran Font" data-tool="font-size">
+                                <span class="font-size-display">12</span>
+                                <svg class="w-3 h-3 inline-block ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </button>
+                            <div class="card-toolbar-dropdown hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[180px]">
+                                <div class="mb-2">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Ukuran Manual</label>
+                                    <input type="number" id="font-size-manual" min="8" max="72" value="12" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                                </div>
+                                <div class="border-t border-gray-200 pt-2 mt-2">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Template</label>
+                                    <div class="space-y-1">
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="10">
+                                            <span style="font-size: 10px;">Sangat Kecil (10px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="12">
+                                            <span style="font-size: 12px;">Kecil (12px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="14">
+                                            <span style="font-size: 14px;">Normal (14px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="16">
+                                            <span style="font-size: 16px;">Besar (16px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="18">
+                                            <span style="font-size: 18px;">Sangat Besar (18px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="24">
+                                            <span style="font-size: 24px;">Judul (24px)</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Tambah Ukuran" data-action="increase-size">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Text Decoration: Bold -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Tebal (Bold)" data-action="bold">
+                        <span class="font-bold text-base">B</span>
+                    </button>
+                    
+                    <!-- Text Decoration: Italic -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Miring (Italic)" data-action="italic">
+                        <span class="italic text-base">I</span>
+                    </button>
+                    
+                    <!-- Text Decoration: Underline -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Garis Bawah (Underline)" data-action="underline">
+                        <span class="underline text-base">U</span>
+                    </button>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Reset Button -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Reset ke Default" data-action="reset-formatting">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -78,20 +232,24 @@ $responsesStats = $responsesStats ?? [
                 <div class="p-6">
                     <!-- Title Input -->
                     <div class="mb-4">
-                        <input
-                            type="text"
-                            placeholder="Judul formulir tanpa judul"
-                            class="w-full text-2xl font-normal text-gray-900 border-none outline-none focus:ring-0 placeholder-gray-400 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors"
-                            id="form-title">
+                        <div
+                            contenteditable="true"
+                            data-placeholder="Judul formulir tanpa judul"
+                            class="w-full text-2xl font-normal text-gray-900 border-none outline-none focus:ring-0 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+                            id="form-title"
+                            style="min-height: 1.5em;"
+                        ></div>
                     </div>
 
                     <!-- Description Input -->
                     <div>
-                        <input
-                            type="text"
-                            placeholder="Deskripsi formulir"
-                            class="w-full text-sm text-gray-600 border-none outline-none focus:ring-0 placeholder-gray-400 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors"
-                            id="form-description">
+                        <div
+                            contenteditable="true"
+                            data-placeholder="Deskripsi formulir"
+                            class="w-full text-sm text-gray-600 border-none outline-none focus:ring-0 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+                            id="form-description"
+                            style="min-height: 1.5em;"
+                        ></div>
                     </div>
                 </div>
             </div>
@@ -431,10 +589,161 @@ $responsesStats = $responsesStats ?? [
     </div>
 </div>
 
+    <!-- Header Setup Modal -->
+    <div id="header-setup-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black bg-opacity-50 px-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <!-- Modal Header -->
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-semibold text-gray-900">Setup Header</h3>
+                    <button type="button" id="header-setup-close" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Preview Header -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Preview</label>
+                    <div id="header-preview" class="w-full h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 overflow-hidden relative" style="background-size: cover; background-position: center; background-repeat: no-repeat;">
+                        <div class="absolute inset-0 flex items-center justify-center text-gray-400">
+                            <div class="text-center">
+                                <svg class="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                <p class="text-sm">Preview Header</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Image Source Selection -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Pilih Sumber Gambar</label>
+                    <div class="flex space-x-4">
+                        <button type="button" id="header-template-btn" class="header-source-btn flex-1 px-4 py-3 border-2 border-red-600 bg-red-50 text-red-600 rounded-lg font-medium hover:bg-red-100 transition-colors">
+                            Template
+                        </button>
+                        <button type="button" id="header-upload-btn" class="header-source-btn flex-1 px-4 py-3 border-2 border-gray-300 bg-white text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors">
+                            Upload Sendiri
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Template Selection -->
+                <div id="header-template-section" class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Pilih Template</label>
+                    <div class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                        <!-- Template images will be loaded dynamically -->
+                    </div>
+                </div>
+
+                <!-- Upload Section -->
+                <div id="header-upload-section" class="mb-6 hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Upload Gambar</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input type="file" id="header-image-upload" accept="image/*" class="hidden">
+                        <label for="header-image-upload" class="cursor-pointer">
+                            <svg class="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                            <p class="text-sm text-gray-600">Klik untuk memilih gambar</p>
+                            <p class="text-xs text-gray-500 mt-1">PNG, JPG, atau GIF (maks. 5MB)</p>
+                        </label>
+                    </div>
+                    <div id="header-upload-preview" class="mt-4 hidden">
+                        <img id="header-upload-preview-img" src="" alt="Preview" class="max-w-full h-32 object-contain rounded-lg border border-gray-300">
+                    </div>
+                </div>
+
+                <!-- Image Mode Selection -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Mode Gambar</label>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="stretch">
+                            Stretch
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="cover">
+                            Cover
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="contain">
+                            Contain
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="repeat">
+                            Repeat
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="center">
+                            Center
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="no-repeat">
+                            No Repeat
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="header-remove-btn" class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-red-600 transition-colors">
+                        Hapus Header
+                    </button>
+                    <button type="button" id="header-cancel-btn" class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors">
+                        Batal
+                    </button>
+                    <button type="button" id="header-save-btn" class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
+                        Simpan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 @endsection
 
 @push('scripts')
 <script>
+    // Set header template images from assets (only files with prefix 'bc_')
+    @php
+    $templateImages = [];
+    // Use header-templates folder if exists, otherwise fallback to images folder with bc_ prefix
+    $templatePath = public_path('assets/images/header-templates');
+    $fallbackPath = public_path('assets/images');
+    
+    $useTemplateFolder = is_dir($templatePath);
+    $imagePath = $useTemplateFolder ? $templatePath : $fallbackPath;
+    $assetPath = $useTemplateFolder ? 'assets/images/header-templates' : 'assets/images';
+    
+    if (is_dir($imagePath)) {
+        $files = scandir($imagePath);
+        $counter = 1;
+        foreach ($files as $file) {
+            if ($file !== '.' && $file !== '..') {
+                // If using template folder, accept all image files. Otherwise, only files with 'bc_' prefix
+                $isTemplate = $useTemplateFolder || strpos($file, 'bc_') === 0;
+                if ($isTemplate) {
+                    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                        $templateImages[] = [
+                            'name' => 'Background ' . $counter,
+                            'path' => asset($assetPath . '/' . $file)
+                        ];
+                        $counter++;
+                    }
+                }
+            }
+        }
+    }
+    @endphp
+    
+    // Assign to global variable (will override the let declaration in form-builder.js)
+    @php
+    $jsonTemplates = json_encode($templateImages);
+    @endphp
+    window.HEADER_TEMPLATE_IMAGES = HEADER_TEMPLATE_IMAGES = {!! $jsonTemplates !!};
+    
+    console.log('Header template images loaded:', HEADER_TEMPLATE_IMAGES);
+    console.log('Template images count:', HEADER_TEMPLATE_IMAGES.length);
+
     document.addEventListener('DOMContentLoaded', function() {
         const summaryTab = document.getElementById('builder-summary-tab');
         const individualTab = document.getElementById('builder-individual-tab');
