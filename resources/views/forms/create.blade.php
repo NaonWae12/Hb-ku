@@ -32,6 +32,15 @@ $responsesStats = $responsesStats ?? [
 
                 <!-- Action Buttons -->
                 <div class="flex items-center space-x-3">
+                    <!-- Header Setup Button (only visible in questions tab) -->
+                    <button id="header-setup-btn" type="button"
+                        class="header-setup-btn flex items-center space-x-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors hidden">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                        <span class="text-sm font-medium">Header</span>
+                    </button>
+
                     <!-- Share Link Button -->
                     <button id="share-link-btn" type="button"
                         class="flex items-center space-x-2 px-4 py-2 bg-white border border-red-600 text-red-600 rounded-lg hover:bg-red-50 transition-colors {{ $shareUrl ? '' : 'hidden' }}">
@@ -580,10 +589,161 @@ $responsesStats = $responsesStats ?? [
     </div>
 </div>
 
+    <!-- Header Setup Modal -->
+    <div id="header-setup-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black bg-opacity-50 px-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <!-- Modal Header -->
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-semibold text-gray-900">Setup Header</h3>
+                    <button type="button" id="header-setup-close" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Preview Header -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Preview</label>
+                    <div id="header-preview" class="w-full h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 overflow-hidden relative" style="background-size: cover; background-position: center; background-repeat: no-repeat;">
+                        <div class="absolute inset-0 flex items-center justify-center text-gray-400">
+                            <div class="text-center">
+                                <svg class="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                <p class="text-sm">Preview Header</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Image Source Selection -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Pilih Sumber Gambar</label>
+                    <div class="flex space-x-4">
+                        <button type="button" id="header-template-btn" class="header-source-btn flex-1 px-4 py-3 border-2 border-red-600 bg-red-50 text-red-600 rounded-lg font-medium hover:bg-red-100 transition-colors">
+                            Template
+                        </button>
+                        <button type="button" id="header-upload-btn" class="header-source-btn flex-1 px-4 py-3 border-2 border-gray-300 bg-white text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors">
+                            Upload Sendiri
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Template Selection -->
+                <div id="header-template-section" class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Pilih Template</label>
+                    <div class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                        <!-- Template images will be loaded dynamically -->
+                    </div>
+                </div>
+
+                <!-- Upload Section -->
+                <div id="header-upload-section" class="mb-6 hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Upload Gambar</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input type="file" id="header-image-upload" accept="image/*" class="hidden">
+                        <label for="header-image-upload" class="cursor-pointer">
+                            <svg class="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                            <p class="text-sm text-gray-600">Klik untuk memilih gambar</p>
+                            <p class="text-xs text-gray-500 mt-1">PNG, JPG, atau GIF (maks. 5MB)</p>
+                        </label>
+                    </div>
+                    <div id="header-upload-preview" class="mt-4 hidden">
+                        <img id="header-upload-preview-img" src="" alt="Preview" class="max-w-full h-32 object-contain rounded-lg border border-gray-300">
+                    </div>
+                </div>
+
+                <!-- Image Mode Selection -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Mode Gambar</label>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="stretch">
+                            Stretch
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="cover">
+                            Cover
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="contain">
+                            Contain
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="repeat">
+                            Repeat
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="center">
+                            Center
+                        </button>
+                        <button type="button" class="header-mode-btn px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium hover:border-red-600 hover:text-red-600 transition-colors" data-mode="no-repeat">
+                            No Repeat
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="header-remove-btn" class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-red-600 transition-colors">
+                        Hapus Header
+                    </button>
+                    <button type="button" id="header-cancel-btn" class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors">
+                        Batal
+                    </button>
+                    <button type="button" id="header-save-btn" class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
+                        Simpan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 @endsection
 
 @push('scripts')
 <script>
+    // Set header template images from assets (only files with prefix 'bc_')
+    @php
+    $templateImages = [];
+    // Use header-templates folder if exists, otherwise fallback to images folder with bc_ prefix
+    $templatePath = public_path('assets/images/header-templates');
+    $fallbackPath = public_path('assets/images');
+    
+    $useTemplateFolder = is_dir($templatePath);
+    $imagePath = $useTemplateFolder ? $templatePath : $fallbackPath;
+    $assetPath = $useTemplateFolder ? 'assets/images/header-templates' : 'assets/images';
+    
+    if (is_dir($imagePath)) {
+        $files = scandir($imagePath);
+        $counter = 1;
+        foreach ($files as $file) {
+            if ($file !== '.' && $file !== '..') {
+                // If using template folder, accept all image files. Otherwise, only files with 'bc_' prefix
+                $isTemplate = $useTemplateFolder || strpos($file, 'bc_') === 0;
+                if ($isTemplate) {
+                    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                        $templateImages[] = [
+                            'name' => 'Background ' . $counter,
+                            'path' => asset($assetPath . '/' . $file)
+                        ];
+                        $counter++;
+                    }
+                }
+            }
+        }
+    }
+    @endphp
+    
+    // Assign to global variable (will override the let declaration in form-builder.js)
+    @php
+    $jsonTemplates = json_encode($templateImages);
+    @endphp
+    window.HEADER_TEMPLATE_IMAGES = HEADER_TEMPLATE_IMAGES = {!! $jsonTemplates !!};
+    
+    console.log('Header template images loaded:', HEADER_TEMPLATE_IMAGES);
+    console.log('Template images count:', HEADER_TEMPLATE_IMAGES.length);
+
     document.addEventListener('DOMContentLoaded', function() {
         const summaryTab = document.getElementById('builder-summary-tab');
         const individualTab = document.getElementById('builder-individual-tab');

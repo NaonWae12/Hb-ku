@@ -3339,6 +3339,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize card formatting toolbar
     initCardFormattingToolbar();
     
+    // Initialize header setup
+    initHeaderSetup();
+    
     const rootElement = document.getElementById('form-builder-root');
     let initialData = null;
     let formMode = 'create';
@@ -6151,6 +6154,400 @@ function renderFontList(fontList, recentFonts, popularFonts, allFonts = null) {
     // Store all fonts for search
     if (allFonts) {
         fontList.setAttribute('data-all-fonts', JSON.stringify(allFonts));
+    }
+}
+
+// Header Setup Management
+let headerState = {
+    imageUrl: null,
+    imageMode: 'cover',
+    source: null // 'template' or 'upload'
+};
+
+// Template images (will be loaded from assets - only files with prefix 'bc_')
+// Paths will be set from Blade template in create.blade.php
+// This is a global variable that will be populated by Blade template
+window.HEADER_TEMPLATE_IMAGES = window.HEADER_TEMPLATE_IMAGES || [];
+
+// Initialize header setup functionality
+function initHeaderSetup() {
+    const headerSetupBtn = document.getElementById('header-setup-btn');
+    const headerModal = document.getElementById('header-setup-modal');
+    const headerCloseBtn = document.getElementById('header-setup-close');
+    const headerCancelBtn = document.getElementById('header-cancel-btn');
+    const headerSaveBtn = document.getElementById('header-save-btn');
+    const headerRemoveBtn = document.getElementById('header-remove-btn');
+    const headerTemplateBtn = document.getElementById('header-template-btn');
+    const headerUploadBtn = document.getElementById('header-upload-btn');
+    const headerTemplateSection = document.getElementById('header-template-section');
+    const headerUploadSection = document.getElementById('header-upload-section');
+    const headerImageUpload = document.getElementById('header-image-upload');
+    const headerPreview = document.getElementById('header-preview');
+    const headerUploadPreview = document.getElementById('header-upload-preview');
+    const headerUploadPreviewImg = document.getElementById('header-upload-preview-img');
+    const headerModeBtns = document.querySelectorAll('.header-mode-btn');
+
+    if (!headerSetupBtn || !headerModal) return;
+
+    // Show/hide header button based on active tab
+    function updateHeaderButtonVisibility() {
+        const questionsTab = document.getElementById('tab-questions');
+        if (questionsTab && !questionsTab.classList.contains('hidden')) {
+            headerSetupBtn.classList.remove('hidden');
+        } else {
+            headerSetupBtn.classList.add('hidden');
+        }
+    }
+
+    // Watch for tab changes
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            setTimeout(updateHeaderButtonVisibility, 100);
+        });
+    });
+    updateHeaderButtonVisibility();
+
+    // Open modal
+    headerSetupBtn.addEventListener('click', () => {
+        headerModal.classList.remove('hidden');
+        headerModal.classList.add('flex');
+        loadHeaderTemplates();
+        updateHeaderPreview();
+    });
+
+    // Close modal
+    const closeModal = () => {
+        headerModal.classList.add('hidden');
+        headerModal.classList.remove('flex');
+    };
+
+    if (headerCloseBtn) headerCloseBtn.addEventListener('click', closeModal);
+    if (headerCancelBtn) headerCancelBtn.addEventListener('click', closeModal);
+    headerModal.addEventListener('click', (e) => {
+        if (e.target === headerModal) closeModal();
+    });
+
+    // Source selection (Template/Upload)
+    if (headerTemplateBtn) {
+        headerTemplateBtn.addEventListener('click', () => {
+            headerTemplateBtn.classList.add('border-red-600', 'bg-red-50', 'text-red-600');
+            headerTemplateBtn.classList.remove('border-gray-300', 'bg-white', 'text-gray-700');
+            headerUploadBtn.classList.remove('border-red-600', 'bg-red-50', 'text-red-600');
+            headerUploadBtn.classList.add('border-gray-300', 'bg-white', 'text-gray-700');
+            headerTemplateSection.classList.remove('hidden');
+            headerUploadSection.classList.add('hidden');
+            headerState.source = 'template';
+        });
+    }
+
+    if (headerUploadBtn) {
+        headerUploadBtn.addEventListener('click', () => {
+            headerUploadBtn.classList.add('border-red-600', 'bg-red-50', 'text-red-600');
+            headerUploadBtn.classList.remove('border-gray-300', 'bg-white', 'text-gray-700');
+            headerTemplateBtn.classList.remove('border-red-600', 'bg-red-50', 'text-red-600');
+            headerTemplateBtn.classList.add('border-gray-300', 'bg-white', 'text-gray-700');
+            headerUploadSection.classList.remove('hidden');
+            headerTemplateSection.classList.add('hidden');
+            headerState.source = 'upload';
+        });
+    }
+
+    // Image upload
+    if (headerImageUpload) {
+        headerImageUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (file.size > 5 * 1024 * 1024) {
+                    alert('Ukuran file maksimal 5MB');
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    headerState.imageUrl = event.target.result;
+                    headerUploadPreviewImg.src = event.target.result;
+                    headerUploadPreview.classList.remove('hidden');
+                    updateHeaderPreview();
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    // Image mode selection
+    headerModeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            headerModeBtns.forEach(b => {
+                b.classList.remove('border-red-600', 'text-red-600', 'bg-red-50');
+                b.classList.add('border-gray-300', 'text-gray-700');
+            });
+            btn.classList.add('border-red-600', 'text-red-600', 'bg-red-50');
+            btn.classList.remove('border-gray-300', 'text-gray-700');
+            headerState.imageMode = btn.getAttribute('data-mode');
+            updateHeaderPreview();
+        });
+    });
+
+    // Save header
+    if (headerSaveBtn) {
+        headerSaveBtn.addEventListener('click', () => {
+            if (!headerState.imageUrl) {
+                alert('Pilih gambar terlebih dahulu');
+                return;
+            }
+            applyHeaderToForm();
+            closeModal();
+        });
+    }
+
+    // Remove header
+    if (headerRemoveBtn) {
+        headerRemoveBtn.addEventListener('click', () => {
+            if (confirm('Yakin ingin menghapus header?')) {
+                headerState.imageUrl = null;
+                headerState.imageMode = 'cover';
+                headerState.source = null;
+                removeHeaderFromForm();
+                closeModal();
+            }
+        });
+    }
+}
+
+// Load header templates
+function loadHeaderTemplates() {
+    const templateSection = document.getElementById('header-template-section');
+    if (!templateSection) {
+        console.error('Header template section not found');
+        return;
+    }
+
+    const templateGrid = templateSection.querySelector('.grid');
+    if (!templateGrid) {
+        console.error('Header template grid not found');
+        return;
+    }
+
+    // Clear existing
+    templateGrid.innerHTML = '';
+
+    // Use window variable to ensure we get the value from Blade template
+    const templates = window.HEADER_TEMPLATE_IMAGES || HEADER_TEMPLATE_IMAGES || [];
+    console.log('Loading header templates:', templates);
+    console.log('Window HEADER_TEMPLATE_IMAGES:', window.HEADER_TEMPLATE_IMAGES);
+    
+    if (!templates || templates.length === 0) {
+        console.warn('No header template images found');
+        templateGrid.innerHTML = '<p class="text-sm text-gray-500 col-span-full text-center py-4">Tidak ada template tersedia</p>';
+        return;
+    }
+
+    templates.forEach((template, index) => {
+        console.log('Processing template:', template);
+        const templateItem = document.createElement('div');
+        templateItem.className = 'relative cursor-pointer group overflow-hidden rounded-lg bg-white';
+        
+        const img = document.createElement('img');
+        // Normalize URL to ensure absolute path
+        const imageUrl = normalizeMediaUrl(template.path);
+        console.log('Template image URL:', imageUrl, 'Original:', template.path);
+        img.src = imageUrl;
+        img.alt = template.name;
+        img.className = 'w-full h-24 object-cover rounded-lg border-2 border-gray-300 group-hover:border-red-600 transition-all duration-200';
+        img.style.cssText = 'display: block !important; min-height: 96px; opacity: 1 !important; visibility: visible !important; background: transparent; position: relative; z-index: 1;';
+        img.loading = 'lazy';
+        img.onerror = function() {
+            console.error('Failed to load template image:', imageUrl, 'Original path:', template.path);
+            this.style.display = 'none';
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'w-full h-24 bg-gray-200 rounded-lg border-2 border-gray-300 flex items-center justify-center text-xs text-gray-500';
+            errorDiv.textContent = 'Gambar tidak ditemukan';
+            templateItem.appendChild(errorDiv);
+        };
+        img.onload = function() {
+            console.log('Template image loaded successfully:', imageUrl);
+            // Ensure image is visible and on top
+            this.style.opacity = '1';
+            this.style.visibility = 'visible';
+            this.style.zIndex = '1';
+        };
+        
+        // Overlay hanya muncul saat hover, tidak menutupi gambar
+        // Gunakan pseudo-element atau overlay yang benar-benar tidak menutupi saat tidak hover
+        const overlay = document.createElement('div');
+        overlay.className = 'absolute inset-0 rounded-lg transition-opacity flex items-center justify-center pointer-events-none';
+        // Set background hanya saat hover menggunakan CSS class, bukan inline style
+        overlay.style.cssText = 'z-index: 2; pointer-events: none; background-color: transparent;';
+        
+        // Tambahkan event listener untuk hover
+        templateItem.addEventListener('mouseenter', () => {
+            overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+        });
+        templateItem.addEventListener('mouseleave', () => {
+            overlay.style.backgroundColor = 'transparent';
+        });
+        
+        const checkIcon = document.createElement('svg');
+        checkIcon.className = 'w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity';
+        checkIcon.setAttribute('fill', 'none');
+        checkIcon.setAttribute('stroke', 'currentColor');
+        checkIcon.setAttribute('viewBox', '0 0 24 24');
+        checkIcon.setAttribute('stroke-width', '2');
+        checkIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>';
+        overlay.appendChild(checkIcon);
+        
+        // Pastikan gambar di-render terlebih dahulu, baru overlay
+        templateItem.appendChild(img);
+        templateItem.appendChild(overlay);
+        
+        // Debug: Log untuk memastikan struktur benar (setelah DOM selesai)
+        setTimeout(() => {
+            const computedImgStyle = window.getComputedStyle(img);
+            const computedOverlayStyle = window.getComputedStyle(overlay);
+            console.log('Template item structure:', {
+                hasImage: !!img,
+                imageSrc: img.src,
+                imageDisplay: computedImgStyle.display,
+                imageOpacity: computedImgStyle.opacity,
+                imageVisibility: computedImgStyle.visibility,
+                imageZIndex: computedImgStyle.zIndex,
+                imagePosition: computedImgStyle.position,
+                hasOverlay: !!overlay,
+                overlayOpacity: computedOverlayStyle.opacity,
+                overlayBackgroundColor: computedOverlayStyle.backgroundColor,
+                overlayZIndex: computedOverlayStyle.zIndex
+            });
+        }, 100);
+        
+        templateItem.addEventListener('click', () => {
+            // Use normalized URL for header state
+            headerState.imageUrl = imageUrl;
+            headerState.source = 'template';
+            updateHeaderPreview();
+            // Update selected state
+            templateGrid.querySelectorAll('img').forEach(el => {
+                el.classList.remove('border-red-600');
+                el.classList.add('border-gray-300');
+            });
+            img.classList.add('border-red-600');
+            img.classList.remove('border-gray-300');
+        });
+        
+        templateGrid.appendChild(templateItem);
+        
+        console.log('Added template:', template.name, 'Path:', template.path);
+    });
+}
+
+// Update header preview
+function updateHeaderPreview() {
+    const headerPreview = document.getElementById('header-preview');
+    if (!headerPreview) return;
+
+    if (!headerState.imageUrl) {
+        headerPreview.style.backgroundImage = 'none';
+        headerPreview.querySelector('.absolute').classList.remove('hidden');
+        return;
+    }
+
+    headerPreview.querySelector('.absolute').classList.add('hidden');
+    
+    // Apply image and mode
+    headerPreview.style.backgroundImage = `url(${headerState.imageUrl})`;
+    
+    // Apply mode
+    switch (headerState.imageMode) {
+        case 'stretch':
+            headerPreview.style.backgroundSize = '100% 100%';
+            headerPreview.style.backgroundPosition = 'center';
+            headerPreview.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'cover':
+            headerPreview.style.backgroundSize = 'cover';
+            headerPreview.style.backgroundPosition = 'center';
+            headerPreview.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'contain':
+            headerPreview.style.backgroundSize = 'contain';
+            headerPreview.style.backgroundPosition = 'center';
+            headerPreview.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'repeat':
+            headerPreview.style.backgroundSize = 'auto';
+            headerPreview.style.backgroundPosition = 'top left';
+            headerPreview.style.backgroundRepeat = 'repeat';
+            break;
+        case 'center':
+            headerPreview.style.backgroundSize = 'auto';
+            headerPreview.style.backgroundPosition = 'center';
+            headerPreview.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'no-repeat':
+            headerPreview.style.backgroundSize = 'auto';
+            headerPreview.style.backgroundPosition = 'center';
+            headerPreview.style.backgroundRepeat = 'no-repeat';
+            break;
+    }
+}
+
+// Apply header to form
+function applyHeaderToForm() {
+    const formHeader = document.querySelector('#tab-questions .bg-white.rounded-lg.shadow-sm.border');
+    if (!formHeader) return;
+
+    // Create or update header element
+    let headerElement = formHeader.querySelector('.form-header-image');
+    if (!headerElement) {
+        headerElement = document.createElement('div');
+        headerElement.className = 'form-header-image w-full h-48 mb-6 rounded-t-lg overflow-hidden';
+        formHeader.insertBefore(headerElement, formHeader.firstChild);
+    }
+
+    headerElement.style.backgroundImage = `url(${headerState.imageUrl})`;
+    
+    // Apply mode
+    switch (headerState.imageMode) {
+        case 'stretch':
+            headerElement.style.backgroundSize = '100% 100%';
+            headerElement.style.backgroundPosition = 'center';
+            headerElement.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'cover':
+            headerElement.style.backgroundSize = 'cover';
+            headerElement.style.backgroundPosition = 'center';
+            headerElement.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'contain':
+            headerElement.style.backgroundSize = 'contain';
+            headerElement.style.backgroundPosition = 'center';
+            headerElement.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'repeat':
+            headerElement.style.backgroundSize = 'auto';
+            headerElement.style.backgroundPosition = 'top left';
+            headerElement.style.backgroundRepeat = 'repeat';
+            break;
+        case 'center':
+            headerElement.style.backgroundSize = 'auto';
+            headerElement.style.backgroundPosition = 'center';
+            headerElement.style.backgroundRepeat = 'no-repeat';
+            break;
+        case 'no-repeat':
+            headerElement.style.backgroundSize = 'auto';
+            headerElement.style.backgroundPosition = 'center';
+            headerElement.style.backgroundRepeat = 'no-repeat';
+            break;
+    }
+}
+
+// Remove header from form
+function removeHeaderFromForm() {
+    const formHeader = document.querySelector('#tab-questions .bg-white.rounded-lg.shadow-sm.border');
+    if (!formHeader) return;
+
+    const headerElement = formHeader.querySelector('.form-header-image');
+    if (headerElement) {
+        headerElement.remove();
     }
 }
 
