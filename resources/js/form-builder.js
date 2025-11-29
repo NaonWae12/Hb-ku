@@ -3336,6 +3336,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize tabs
     initTabs();
     
+    // Initialize card formatting toolbar
+    initCardFormattingToolbar();
+    
     const rootElement = document.getElementById('form-builder-root');
     let initialData = null;
     let formMode = 'create';
@@ -4275,8 +4278,8 @@ function collectFormData(options = {}) {
     const { includeRules = true } = options;
 
     const formData = {
-        title: document.getElementById('form-title')?.value || 'Formulir tanpa judul',
-        description: document.getElementById('form-description')?.value || '',
+        title: getPlainTextFromContentEditable(document.getElementById('form-title')) || 'Formulir tanpa judul',
+        description: getPlainTextFromContentEditable(document.getElementById('form-description')) || '',
         theme_color: (() => {
             const selectedThemeButton = document.querySelector('[data-theme-color][data-selected="true"]');
             return selectedThemeButton ? selectedThemeButton.getAttribute('data-theme-color') : 'red';
@@ -4302,8 +4305,8 @@ function collectFormData(options = {}) {
         const wrapModeSelect = section.querySelector('.section-image-wrap-mode-select');
         
         formData.sections.push({
-            title: titleInput?.value?.trim() || null,
-            description: descInput?.value?.trim() || null,
+            title: getPlainTextFromContentEditable(titleInput)?.trim() || null,
+            description: getPlainTextFromContentEditable(descInput)?.trim() || null,
             image: imageValueInput?.value?.trim() || null,
             image_alignment: alignmentSelect?.value || 'center',
             image_wrap_mode: wrapModeSelect?.value || 'fixed',
@@ -4423,7 +4426,7 @@ function collectFormData(options = {}) {
 
         const questionData = {
             type: questionCard.getAttribute('data-question-type') || 'short-answer',
-            title: questionCard.querySelector('.question-title')?.value || '',
+            title: getPlainTextFromContentEditable(questionCard.querySelector('.question-title')) || '',
             description: questionCard.querySelector('.question-description')?.value || '',
             is_required: questionCard.querySelector('.required-checkbox')?.checked || false,
             options: [],
@@ -4807,12 +4810,30 @@ function populateFormBuilder(data) {
 
     const titleInput = document.getElementById('form-title');
     if (titleInput) {
-        titleInput.value = data.title || '';
+        if (titleInput.contentEditable === 'true') {
+            titleInput.textContent = data.title || '';
+            if (!data.title) {
+                titleInput.classList.add('empty');
+            } else {
+                titleInput.classList.remove('empty');
+            }
+        } else {
+            titleInput.value = data.title || '';
+        }
     }
 
     const descriptionInput = document.getElementById('form-description');
     if (descriptionInput) {
-        descriptionInput.value = data.description || '';
+        if (descriptionInput.contentEditable === 'true') {
+            descriptionInput.textContent = data.description || '';
+            if (!data.description) {
+                descriptionInput.classList.add('empty');
+            } else {
+                descriptionInput.classList.remove('empty');
+            }
+        } else {
+            descriptionInput.value = data.description || '';
+        }
     }
 
     updateThemeColorSelection(data.theme_color || 'red');
@@ -5152,5 +5173,1170 @@ function populateFormBuilder(data) {
             initSortable();
             updateMainButtonsVisibility();
         },
+    });
+}
+
+// Card Formatting Toolbar Management
+let activeCardElement = null;
+let activeInputElement = null; // Store the currently active input element
+let cardFormattingState = {
+    textAlign: 'left',
+    fontFamily: 'Arial',
+    fontSize: 12,
+    fontWeight: 'normal',
+    fontStyle: 'normal',
+    textDecoration: 'none'
+};
+
+// Initialize card formatting toolbar
+function initCardFormattingToolbar() {
+    const toolbar = document.getElementById('card-formatting-toolbar');
+    if (!toolbar) return;
+
+    // List of allowed input elements for toolbar
+    const allowedInputs = [
+        '#form-title',                    // Judul form
+        '#form-description',              // Deskripsi form
+        '.question-title',                // Pertanyaan
+        '.section-title-input',           // Judul bagian
+        '.section-description-input'      // Deskripsi bagian
+    ];
+
+    // Show/hide toolbar based on cursor focus
+    function handleFocus(e) {
+        const target = e.target;
+        const isAllowed = allowedInputs.some(selector => {
+            if (selector.startsWith('#')) {
+                return target.id === selector.substring(1);
+            } else if (selector.startsWith('.')) {
+                return target.classList.contains(selector.substring(1));
+            }
+            return false;
+        });
+
+        if (isAllowed) {
+            // Convert to contenteditable if needed
+            let editableElement = target;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                editableElement = convertToContentEditable(target);
+            }
+            
+            // Store the active input element
+            activeInputElement = editableElement;
+            activeCardElement = editableElement.closest('.question-card, .section-divider') || editableElement.closest('.bg-white.rounded-lg');
+            toolbar.classList.remove('opacity-0', 'pointer-events-none');
+            toolbar.classList.add('opacity-100', 'pointer-events-auto');
+            
+            // Load existing formatting from data attributes or inline styles
+            loadExistingFormatting(editableElement);
+            
+            // Listen for selection changes to update button states (only add once)
+            if (!editableElement.hasAttribute('data-formatting-listeners')) {
+                editableElement.setAttribute('data-formatting-listeners', 'true');
+                editableElement.addEventListener('mouseup', () => {
+                    setTimeout(updateFormattingButtonStates, 10);
+                });
+                editableElement.addEventListener('keyup', () => {
+                    setTimeout(updateFormattingButtonStates, 10);
+                });
+                editableElement.addEventListener('keydown', (e) => {
+                    // Update on arrow keys
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                        setTimeout(updateFormattingButtonStates, 10);
+                    }
+                });
+            }
+        }
+    }
+    
+    // Load existing formatting from element
+    function loadExistingFormatting(element) {
+        const parentCard = element.closest('.question-card, .section-divider, .bg-white.rounded-lg');
+        const source = parentCard || element;
+        
+        // Get formatting from data attributes or inline styles
+        // For fontFamily, check computed style to get actual font being used
+        let fontFamily = source.getAttribute('data-fontFamily') || element.style.fontFamily || 'Arial';
+        
+        // If fontFamily is empty or default, try to get from computed style
+        if (!fontFamily || fontFamily === 'Arial' || fontFamily === '') {
+            const computedStyle = window.getComputedStyle(element);
+            const computedFont = computedStyle.fontFamily;
+            // Extract first font family from computed style (e.g., "Times New Roman, serif" -> "Times New Roman")
+            if (computedFont) {
+                fontFamily = computedFont.split(',')[0].replace(/['"]/g, '').trim();
+            }
+        }
+        
+        const textAlign = source.getAttribute('data-textAlign') || element.style.textAlign || 'left';
+        const fontSize = source.getAttribute('data-fontSize') || parseInt(element.style.fontSize) || 12;
+        const fontWeight = source.getAttribute('data-fontWeight') || element.style.fontWeight || 'normal';
+        const fontStyle = source.getAttribute('data-fontStyle') || element.style.fontStyle || 'normal';
+        const textDecoration = source.getAttribute('data-textDecoration') || element.style.textDecoration || 'none';
+        
+        // Update state
+        cardFormattingState = {
+            textAlign: textAlign,
+            fontFamily: fontFamily,
+            fontSize: fontSize,
+            fontWeight: fontWeight,
+            fontStyle: fontStyle,
+            textDecoration: textDecoration
+        };
+        
+        // Update displays
+        updateFontSizeDisplay(fontSize);
+        updateFontFamilyDisplay(fontFamily);
+        updateTextAlignIcon(textAlign);
+        
+        // Update manual input
+        const fontSizeManualInput = document.querySelector('#font-size-manual');
+        if (fontSizeManualInput) {
+            fontSizeManualInput.value = fontSize;
+        }
+        
+        // Update button states
+        const toolbar = document.getElementById('card-formatting-toolbar');
+        if (toolbar) {
+            // Bold
+            const boldBtn = toolbar.querySelector('[data-tool="bold"]');
+            if (boldBtn) {
+                if (fontWeight === 'bold' || fontWeight === '700') {
+                    boldBtn.classList.add('bg-red-100');
+                } else {
+                    boldBtn.classList.remove('bg-red-100');
+                }
+            }
+            
+            // Italic
+            const italicBtn = toolbar.querySelector('[data-tool="italic"]');
+            if (italicBtn) {
+                if (fontStyle === 'italic') {
+                    italicBtn.classList.add('bg-red-100');
+                } else {
+                    italicBtn.classList.remove('bg-red-100');
+                }
+            }
+            
+            // Underline
+            const underlineBtn = toolbar.querySelector('[data-tool="underline"]');
+            if (underlineBtn) {
+                if (textDecoration === 'underline') {
+                    underlineBtn.classList.add('bg-red-100');
+                } else {
+                    underlineBtn.classList.remove('bg-red-100');
+                }
+            }
+        }
+    }
+
+    function handleBlur(e) {
+        // Delay to check if focus moved to another allowed input or toolbar
+        setTimeout(() => {
+            const activeElement = document.activeElement;
+            
+            // Check if focus moved to toolbar
+            const toolbarElement = document.getElementById('card-formatting-toolbar');
+            const isClickingToolbar = toolbarElement && (
+                toolbarElement.contains(activeElement) || 
+                activeElement.closest('#card-formatting-toolbar')
+            );
+            
+            // If clicking toolbar, keep it visible and don't clear activeInputElement
+            if (isClickingToolbar) {
+                return; // Keep toolbar visible and activeInputElement intact
+            }
+            
+            // Check if focus moved to another allowed input
+            const isAllowed = allowedInputs.some(selector => {
+                if (selector.startsWith('#')) {
+                    return activeElement.id === selector.substring(1);
+                } else if (selector.startsWith('.')) {
+                    return activeElement.classList.contains(selector.substring(1));
+                }
+                return false;
+            });
+
+            // Only hide toolbar if focus is not on allowed input and not on toolbar
+            if (!isAllowed && !isClickingToolbar) {
+                activeCardElement = null;
+                activeInputElement = null;
+                toolbar.classList.add('opacity-0', 'pointer-events-none');
+                toolbar.classList.remove('opacity-100', 'pointer-events-auto');
+            } else if (isAllowed) {
+                // Focus moved to another allowed input, update activeInputElement
+                activeInputElement = activeElement;
+                activeCardElement = activeElement.closest('.question-card, .section-divider') || activeElement.closest('.bg-white.rounded-lg');
+                loadExistingFormatting(activeElement);
+            }
+        }, 100);
+    }
+
+    // Attach focus/blur listeners to all allowed inputs
+    document.addEventListener('focusin', handleFocus);
+    document.addEventListener('focusout', handleBlur);
+    
+    // Prevent toolbar from hiding when clicking inside it
+    toolbar.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // Prevent input from losing focus
+    });
+    
+    // Also handle clicks on toolbar to prevent blur
+    toolbar.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Keep toolbar visible
+        if (activeInputElement) {
+            toolbar.classList.remove('opacity-0', 'pointer-events-none');
+            toolbar.classList.add('opacity-100', 'pointer-events-auto');
+        }
+    });
+
+    // Also check on initial load if any input is already focused
+    const activeElement = document.activeElement;
+    const isAllowed = allowedInputs.some(selector => {
+        if (selector.startsWith('#')) {
+            return activeElement.id === selector.substring(1);
+        } else if (selector.startsWith('.')) {
+            return activeElement.classList.contains(selector.substring(1));
+        }
+        return false;
+    });
+
+    if (isAllowed) {
+        activeInputElement = activeElement;
+        activeCardElement = activeElement.closest('.question-card, .section-divider') || activeElement.closest('.bg-white.rounded-lg');
+        toolbar.classList.remove('opacity-0', 'pointer-events-none');
+        toolbar.classList.add('opacity-100', 'pointer-events-auto');
+        
+        // Load existing formatting from data attributes or inline styles
+        loadExistingFormatting(activeElement);
+    }
+
+    // Handle toolbar button clicks
+    setupToolbarEvents();
+    
+    // Load Google Fonts (lazy load when font dropdown is opened)
+}
+
+// Setup toolbar event handlers
+function setupToolbarEvents() {
+    const toolbar = document.getElementById('card-formatting-toolbar');
+    if (!toolbar) return;
+
+    // Text Alignment
+    const textAlignBtn = toolbar.querySelector('[data-tool="text-align"]');
+    const textAlignDropdown = textAlignBtn?.nextElementSibling;
+    const textAlignOptions = toolbar.querySelectorAll('.text-align-option');
+    const textAlignIcon = toolbar.querySelector('#text-align-icon');
+    
+    if (textAlignBtn && textAlignDropdown) {
+        textAlignBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            textAlignDropdown.classList.toggle('hidden');
+        });
+        
+        textAlignOptions.forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const value = option.getAttribute('data-value');
+                cardFormattingState.textAlign = value;
+                applyCardFormatting('textAlign', value);
+                updateTextAlignIcon(value);
+                textAlignDropdown.classList.add('hidden');
+            });
+        });
+    }
+
+    // Font Family
+    const fontFamilyBtn = toolbar.querySelector('[data-tool="font-family"]');
+    const fontFamilyDropdown = fontFamilyBtn?.nextElementSibling;
+    const fontFamilySearchInput = toolbar.querySelector('#font-family-search-input');
+    const fontFamilyList = toolbar.querySelector('#font-family-list');
+    
+    if (fontFamilyBtn && fontFamilyDropdown) {
+        fontFamilyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fontFamilyDropdown.classList.toggle('hidden');
+            if (!fontFamilyDropdown.classList.contains('hidden')) {
+                // Clear search input when opening
+                if (fontFamilySearchInput) {
+                    fontFamilySearchInput.value = '';
+                }
+                // Load fonts if not already loaded
+                if (fontFamilyList.children.length === 0) {
+                    loadGoogleFonts();
+                } else {
+                    // Reset to show recent + popular if search was active
+                    filterFonts('');
+                }
+            }
+        });
+        
+        if (fontFamilySearchInput) {
+            fontFamilySearchInput.addEventListener('input', (e) => {
+                filterFonts(e.target.value);
+            });
+        }
+    }
+
+    // Font Size - Manual Input
+    const fontSizeManualInput = toolbar.querySelector('#font-size-manual');
+    if (fontSizeManualInput) {
+        fontSizeManualInput.addEventListener('change', (e) => {
+            const value = parseInt(e.target.value) || 12;
+            if (value >= 8 && value <= 72) {
+                cardFormattingState.fontSize = value;
+                applyCardFormatting('fontSize', value);
+                updateFontSizeDisplay(value);
+            }
+        });
+    }
+
+    // Font Size - Increase/Decrease Buttons
+    const increaseSizeBtn = toolbar.querySelector('[data-action="increase-size"]');
+    const decreaseSizeBtn = toolbar.querySelector('[data-action="decrease-size"]');
+    
+    if (increaseSizeBtn) {
+        increaseSizeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const newSize = Math.min(cardFormattingState.fontSize + 1, 72);
+            cardFormattingState.fontSize = newSize;
+            applyCardFormatting('fontSize', newSize);
+            updateFontSizeDisplay(newSize);
+            if (fontSizeManualInput) fontSizeManualInput.value = newSize;
+        });
+    }
+    
+    if (decreaseSizeBtn) {
+        decreaseSizeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const newSize = Math.max(cardFormattingState.fontSize - 1, 8);
+            cardFormattingState.fontSize = newSize;
+            applyCardFormatting('fontSize', newSize);
+            updateFontSizeDisplay(newSize);
+            if (fontSizeManualInput) fontSizeManualInput.value = newSize;
+        });
+    }
+
+    // Font Size - Template Options
+    const fontSizeBtn = toolbar.querySelector('[data-tool="font-size"]');
+    const fontSizeDropdown = fontSizeBtn?.nextElementSibling;
+    const fontSizeTemplateOptions = toolbar.querySelectorAll('.font-size-template-option');
+    
+    if (fontSizeBtn && fontSizeDropdown) {
+        fontSizeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fontSizeDropdown.classList.toggle('hidden');
+        });
+        
+        fontSizeTemplateOptions.forEach(option => {
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const value = parseInt(option.getAttribute('data-value')) || 12;
+                cardFormattingState.fontSize = value;
+                applyCardFormatting('fontSize', value);
+                updateFontSizeDisplay(value);
+                if (fontSizeManualInput) fontSizeManualInput.value = value;
+                fontSizeDropdown.classList.add('hidden');
+            });
+        });
+    }
+
+    // Bold Button
+    const boldBtn = toolbar.querySelector('[data-action="bold"]');
+    if (boldBtn) {
+        boldBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Check current state first
+            const currentState = checkFormattingState('fontWeight');
+            const newState = currentState === 'bold' ? 'normal' : 'bold';
+            cardFormattingState.fontWeight = newState;
+            applyCardFormatting('fontWeight', newState);
+            // Update button state after a short delay to ensure formatting is applied
+            setTimeout(() => {
+                updateFormattingButtonStates();
+            }, 10);
+        });
+    }
+
+    // Italic Button
+    const italicBtn = toolbar.querySelector('[data-action="italic"]');
+    if (italicBtn) {
+        italicBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Check current state first
+            const currentState = checkFormattingState('fontStyle');
+            const newState = currentState === 'italic' ? 'normal' : 'italic';
+            cardFormattingState.fontStyle = newState;
+            applyCardFormatting('fontStyle', newState);
+            // Update button state after a short delay to ensure formatting is applied
+            setTimeout(() => {
+                updateFormattingButtonStates();
+            }, 10);
+        });
+    }
+
+    // Underline Button
+    const underlineBtn = toolbar.querySelector('[data-action="underline"]');
+    if (underlineBtn) {
+        underlineBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Check current state first
+            const currentState = checkFormattingState('textDecoration');
+            const newState = currentState === 'underline' ? 'none' : 'underline';
+            cardFormattingState.textDecoration = newState;
+            applyCardFormatting('textDecoration', newState);
+            // Update button state after a short delay to ensure formatting is applied
+            setTimeout(() => {
+                updateFormattingButtonStates();
+            }, 10);
+        });
+    }
+
+    // Reset Button
+    const resetBtn = toolbar.querySelector('[data-action="reset-formatting"]');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            resetCardFormatting();
+        });
+    }
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!toolbar.contains(e.target)) {
+            toolbar.querySelectorAll('.card-toolbar-dropdown').forEach(dropdown => {
+                dropdown.classList.add('hidden');
+            });
+        }
+    });
+}
+
+// Update font size display
+function updateFontSizeDisplay(size) {
+    const display = document.querySelector('.font-size-display');
+    if (display) {
+        display.textContent = size;
+    }
+}
+
+// Update font family display
+function updateFontFamilyDisplay(fontFamily) {
+    const display = document.querySelector('.font-family-display');
+    if (display) {
+        display.textContent = fontFamily;
+    }
+}
+
+// Update text align icon based on selection
+function updateTextAlignIcon(alignment) {
+    const icon = document.querySelector('#text-align-icon');
+    if (!icon) return;
+
+    // Remove all existing paths
+    icon.innerHTML = '';
+
+    let pathD = '';
+    switch (alignment) {
+        case 'left':
+            // Left: garis pertama penuh, garis kedua dan ketiga pendek (seperti referensi sebelumnya)
+            pathD = 'M4 6h16M4 12h8M4 18h8';
+            break;
+        case 'center':
+            // Center: top/bottom pendek, middle panjang, semua centered
+            pathD = 'M6 6h12M4 10h16M6 14h12M4 18h16';
+            break;
+        case 'right':
+            // Right: dua garis penuh di atas, satu garis pendek di kanan bawah
+            pathD = 'M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25';
+            break;
+        case 'justify':
+            // Justify: semua garis penuh (rata kiri kanan)
+            pathD = 'M4 6h16M4 10h16M4 14h16M4 18h16';
+            break;
+        default:
+            pathD = 'M4 6h16M4 12h8M4 18h8'; // Default to left
+    }
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('d', pathD);
+    icon.appendChild(path);
+}
+
+// Convert input/textarea to contenteditable div for rich text formatting
+function convertToContentEditable(element) {
+    if (!element || element.contentEditable === 'true') return element;
+    
+    // Create contenteditable div
+    const contentEditable = document.createElement('div');
+    contentEditable.contentEditable = 'true';
+    contentEditable.className = element.className;
+    contentEditable.style.cssText = element.style.cssText;
+    
+    // Copy value
+    const text = element.value || element.textContent || '';
+    contentEditable.textContent = text;
+    
+    // Copy attributes
+    if (element.id) contentEditable.id = element.id;
+    if (element.placeholder) contentEditable.setAttribute('data-placeholder', element.placeholder);
+    
+    // Add placeholder styling
+    if (element.placeholder) {
+        contentEditable.addEventListener('focus', function() {
+            if (!this.textContent.trim()) {
+                this.classList.add('empty');
+            }
+        });
+        contentEditable.addEventListener('blur', function() {
+            if (!this.textContent.trim()) {
+                this.classList.add('empty');
+            } else {
+                this.classList.remove('empty');
+            }
+        });
+        if (!text.trim()) {
+            contentEditable.classList.add('empty');
+        }
+    }
+    
+    // Replace element
+    element.parentNode.replaceChild(contentEditable, element);
+    
+    return contentEditable;
+}
+
+// Get plain text from contenteditable (for form submission)
+function getPlainTextFromContentEditable(element) {
+    if (!element) return '';
+    if (element.contentEditable === 'true') {
+        return element.textContent || element.innerText || '';
+    }
+    return element.value || '';
+}
+
+// Apply formatting to active card (FE ONLY - no database connection)
+function applyCardFormatting(property, value) {
+    // Use stored activeInputElement instead of document.activeElement
+    // This ensures formatting is applied even when user clicks toolbar (which causes blur)
+    if (!activeInputElement) return;
+
+    let activeInput = activeInputElement;
+    
+    // Convert to contenteditable if not already
+    if (activeInput.tagName === 'INPUT' || activeInput.tagName === 'TEXTAREA') {
+        activeInput = convertToContentEditable(activeInput);
+        activeInputElement = activeInput; // Update reference
+    }
+    
+    // Check if there's a selection
+    const selection = window.getSelection();
+    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    
+    // If there's a selection, apply formatting to selection only
+    if (range && !range.collapsed && activeInput.contains(range.commonAncestorContainer)) {
+        // Apply formatting to selected text
+        applyFormattingToSelection(property, value, range);
+        return;
+    }
+    
+    // If no selection, apply to entire element (for textAlign, fontSize, fontFamily)
+    if (property === 'textAlign' || property === 'fontSize' || property === 'fontFamily') {
+        activeInput.style[property] = property === 'fontSize' ? `${value}px` : value;
+    }
+
+    // Store formatting in data attribute for FE persistence (NOT saved to database)
+    // Store on the input element itself or its parent card
+    const parentCard = activeInput.closest('.question-card, .section-divider, .bg-white.rounded-lg');
+    if (parentCard) {
+        parentCard.setAttribute(`data-${property}`, value);
+    } else {
+        activeInput.setAttribute(`data-${property}`, value);
+    }
+}
+
+// Apply formatting to selected text only
+function applyFormattingToSelection(property, value, range) {
+    if (!range || range.collapsed) return;
+    
+    try {
+        // Save selection
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range.cloneRange());
+        
+        // Apply formatting based on property
+        switch (property) {
+            case 'fontWeight':
+                // Toggle bold - execCommand automatically toggles
+                document.execCommand('bold', false, null);
+                break;
+            case 'fontStyle':
+                // Toggle italic - execCommand automatically toggles
+                document.execCommand('italic', false, null);
+                break;
+            case 'textDecoration':
+                // Toggle underline - execCommand automatically toggles
+                document.execCommand('underline', false, null);
+                break;
+            case 'fontSize':
+                // Wrap selection in span with font size
+                const fontSizeSpan = document.createElement('span');
+                fontSizeSpan.style.fontSize = `${value}px`;
+                try {
+                    range.surroundContents(fontSizeSpan);
+                } catch (e) {
+                    // If surroundContents fails, use extractContents
+                    const contents = range.extractContents();
+                    fontSizeSpan.appendChild(contents);
+                    range.insertNode(fontSizeSpan);
+                }
+                break;
+            case 'fontFamily':
+                // Wrap selection in span with font family
+                const fontFamilySpan = document.createElement('span');
+                fontFamilySpan.style.fontFamily = value;
+                try {
+                    range.surroundContents(fontFamilySpan);
+                } catch (e) {
+                    const contents = range.extractContents();
+                    fontFamilySpan.appendChild(contents);
+                    range.insertNode(fontFamilySpan);
+                }
+                break;
+            case 'textAlign':
+                // Text alignment applies to entire block, not selection
+                const activeInput = activeInputElement;
+                if (activeInput) {
+                    activeInput.style.textAlign = value;
+                }
+                break;
+        }
+        
+        // Update button states for bold/italic/underline
+        if (property === 'fontWeight' || property === 'fontStyle' || property === 'textDecoration') {
+            updateFormattingButtonStates();
+        }
+        
+        // Update displays for fontSize and fontFamily
+        if (property === 'fontSize') {
+            updateFontSizeDisplay(value);
+        }
+        if (property === 'fontFamily') {
+            updateFontFamilyDisplay(value);
+        }
+        if (property === 'textAlign') {
+            updateTextAlignIcon(value);
+        }
+        
+    } catch (e) {
+        console.error('Error applying formatting to selection:', e);
+    }
+}
+
+// Check formatting state at cursor/selection position
+function checkFormattingState(property) {
+    if (!activeInputElement) return null;
+    
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    
+    const range = selection.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+    let element = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    
+    // Traverse up to find formatting
+    while (element && element !== document.body && element !== activeInputElement) {
+        const computedStyle = window.getComputedStyle(element);
+        
+        if (property === 'fontWeight') {
+            if (element.tagName === 'STRONG' || element.tagName === 'B' || 
+                computedStyle.fontWeight === 'bold' || computedStyle.fontWeight === '700' ||
+                parseInt(computedStyle.fontWeight) >= 700) {
+                return 'bold';
+            }
+        } else if (property === 'fontStyle') {
+            if (element.tagName === 'EM' || element.tagName === 'I' || 
+                computedStyle.fontStyle === 'italic') {
+                return 'italic';
+            }
+        } else if (property === 'textDecoration') {
+            if (element.tagName === 'U' || 
+                computedStyle.textDecoration.includes('underline')) {
+                return 'underline';
+            }
+        }
+        
+        element = element.parentElement;
+    }
+    
+    return 'normal';
+}
+
+// Update formatting button states based on current selection or cursor position
+function updateFormattingButtonStates() {
+    if (!activeInputElement) return;
+    
+    const toolbar = document.getElementById('card-formatting-toolbar');
+    if (!toolbar) return;
+    
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        // No selection, check at cursor position
+        const boldState = checkFormattingState('fontWeight');
+        const italicState = checkFormattingState('fontStyle');
+        const underlineState = checkFormattingState('textDecoration');
+        
+        const boldBtn = toolbar.querySelector('[data-action="bold"]');
+        if (boldBtn) {
+            if (boldState === 'bold') {
+                boldBtn.classList.add('bg-red-100');
+            } else {
+                boldBtn.classList.remove('bg-red-100');
+            }
+        }
+        
+        const italicBtn = toolbar.querySelector('[data-action="italic"]');
+        if (italicBtn) {
+            if (italicState === 'italic') {
+                italicBtn.classList.add('bg-red-100');
+            } else {
+                italicBtn.classList.remove('bg-red-100');
+            }
+        }
+        
+        const underlineBtn = toolbar.querySelector('[data-action="underline"]');
+        if (underlineBtn) {
+            if (underlineState === 'underline') {
+                underlineBtn.classList.add('bg-red-100');
+            } else {
+                underlineBtn.classList.remove('bg-red-100');
+            }
+        }
+        return;
+    }
+    
+    const range = selection.getRangeAt(0);
+    
+    // Check if selection contains bold/italic/underline
+    const container = range.commonAncestorContainer;
+    let element = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    
+    let isBold = false;
+    let isItalic = false;
+    let isUnderline = false;
+    
+    // Traverse up to find formatting
+    while (element && element !== document.body && element !== activeInputElement) {
+        const computedStyle = window.getComputedStyle(element);
+        
+        // Check bold
+        if (!isBold && (element.tagName === 'STRONG' || element.tagName === 'B' || 
+            computedStyle.fontWeight === 'bold' || computedStyle.fontWeight === '700' ||
+            parseInt(computedStyle.fontWeight) >= 700)) {
+            isBold = true;
+        }
+        
+        // Check italic
+        if (!isItalic && (element.tagName === 'EM' || element.tagName === 'I' || 
+            computedStyle.fontStyle === 'italic')) {
+            isItalic = true;
+        }
+        
+        // Check underline
+        if (!isUnderline && (element.tagName === 'U' || 
+            computedStyle.textDecoration.includes('underline'))) {
+            isUnderline = true;
+        }
+        
+        element = element.parentElement;
+    }
+    
+    // Update button states
+    const boldBtn = toolbar.querySelector('[data-action="bold"]');
+    if (boldBtn) {
+        if (isBold) {
+            boldBtn.classList.add('bg-red-100');
+        } else {
+            boldBtn.classList.remove('bg-red-100');
+        }
+    }
+    
+    const italicBtn = toolbar.querySelector('[data-action="italic"]');
+    if (italicBtn) {
+        if (isItalic) {
+            italicBtn.classList.add('bg-red-100');
+        } else {
+            italicBtn.classList.remove('bg-red-100');
+        }
+    }
+    
+    const underlineBtn = toolbar.querySelector('[data-action="underline"]');
+    if (underlineBtn) {
+        if (isUnderline) {
+            underlineBtn.classList.add('bg-red-100');
+        } else {
+            underlineBtn.classList.remove('bg-red-100');
+        }
+    }
+}
+
+// Font Cache Management
+const FONT_CACHE_KEYS = {
+    RECENT: 'formBuilder_recentFonts',
+    POPULAR: 'formBuilder_popularFonts',
+    ALL_FONTS: 'formBuilder_allFonts',
+    CACHE_DATE: 'formBuilder_fontsCacheDate'
+};
+
+// Default popular fonts (15 fonts umum)
+const DEFAULT_POPULAR_FONTS = [
+    'Inter', 'Roboto', 'Open Sans', 'Poppins', 
+    'Lato', 'Montserrat', 'Raleway', 'Ubuntu',
+    'Times New Roman', 'Arial', 'Helvetica', 'Georgia',
+    'Verdana', 'Courier New', 'Comic Sans MS'
+];
+
+// Get recent fonts from localStorage (max 3)
+function getRecentFonts() {
+    try {
+        const recent = localStorage.getItem(FONT_CACHE_KEYS.RECENT);
+        return recent ? JSON.parse(recent) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+// Save font to recent fonts (max 3)
+function saveRecentFont(fontFamily) {
+    try {
+        let recent = getRecentFonts();
+        // Remove if already exists
+        recent = recent.filter(f => f !== fontFamily);
+        // Add to beginning
+        recent.unshift(fontFamily);
+        // Keep only 3 most recent
+        recent = recent.slice(0, 3);
+        localStorage.setItem(FONT_CACHE_KEYS.RECENT, JSON.stringify(recent));
+    } catch (e) {
+        console.error('Error saving recent font:', e);
+    }
+}
+
+// Get popular fonts from localStorage
+function getPopularFonts() {
+    try {
+        const popular = localStorage.getItem(FONT_CACHE_KEYS.POPULAR);
+        return popular ? JSON.parse(popular) : DEFAULT_POPULAR_FONTS;
+    } catch (e) {
+        return DEFAULT_POPULAR_FONTS;
+    }
+}
+
+// Save popular fonts to localStorage
+function savePopularFonts(fonts) {
+    try {
+        localStorage.setItem(FONT_CACHE_KEYS.POPULAR, JSON.stringify(fonts));
+    } catch (e) {
+        console.error('Error saving popular fonts:', e);
+    }
+}
+
+// Get all fonts from cache
+function getAllFontsFromCache() {
+    try {
+        const cached = localStorage.getItem(FONT_CACHE_KEYS.ALL_FONTS);
+        const cacheDate = localStorage.getItem(FONT_CACHE_KEYS.CACHE_DATE);
+        // Cache valid for 7 days
+        if (cached && cacheDate) {
+            const date = new Date(cacheDate);
+            const now = new Date();
+            const daysDiff = (now - date) / (1000 * 60 * 60 * 24);
+            if (daysDiff < 7) {
+                return JSON.parse(cached);
+            }
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Save all fonts to cache
+function saveAllFontsToCache(fonts) {
+    try {
+        localStorage.setItem(FONT_CACHE_KEYS.ALL_FONTS, JSON.stringify(fonts));
+        localStorage.setItem(FONT_CACHE_KEYS.CACHE_DATE, new Date().toISOString());
+    } catch (e) {
+        console.error('Error saving fonts cache:', e);
+    }
+}
+
+// Create font option button
+function createFontOption(fontFamily, fontList) {
+    const fontOption = document.createElement('button');
+    fontOption.className = 'font-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded';
+    fontOption.style.fontFamily = fontFamily;
+    fontOption.setAttribute('data-font', fontFamily);
+    fontOption.textContent = fontFamily;
+    fontOption.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cardFormattingState.fontFamily = fontFamily;
+        applyCardFormatting('fontFamily', fontFamily);
+        saveRecentFont(fontFamily);
+        
+        // Update font family display in toolbar
+        updateFontFamilyDisplay(fontFamily);
+        
+        // Load font if not already loaded (only for Google Fonts, skip system fonts)
+        const systemFonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia', 'Comic Sans MS'];
+        if (!systemFonts.includes(fontFamily) && !document.querySelector(`link[href*="${fontFamily.replace(/\s+/g, '+')}"]`)) {
+            const link = document.createElement('link');
+            link.href = `https://fonts.googleapis.com/css2?family=${fontFamily.replace(/\s+/g, '+')}:wght@400;600;700&display=swap`;
+            link.rel = 'stylesheet';
+            document.head.appendChild(link);
+        }
+        
+        document.querySelector('[data-tool="font-family"]').nextElementSibling.classList.add('hidden');
+    });
+    return fontOption;
+}
+
+// Render font list with sections
+function renderFontList(fontList, recentFonts, popularFonts, allFonts = null) {
+    // Clear existing
+    fontList.innerHTML = '';
+    
+    // Recent fonts section (3 fonts)
+    if (recentFonts.length > 0) {
+        const recentSection = document.createElement('div');
+        recentSection.className = 'mb-3';
+        const recentLabel = document.createElement('div');
+        recentLabel.className = 'text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-1';
+        recentLabel.textContent = 'Baru Digunakan';
+        recentSection.appendChild(recentLabel);
+        
+        recentFonts.forEach(font => {
+            recentSection.appendChild(createFontOption(font, fontList));
+        });
+        
+        fontList.appendChild(recentSection);
+        
+        // Separator
+        const separator = document.createElement('div');
+        separator.className = 'border-t border-gray-200 my-2';
+        fontList.appendChild(separator);
+    }
+    
+    // Popular fonts section (8 fonts)
+    const popularSection = document.createElement('div');
+    popularSection.className = 'mb-3';
+    const popularLabel = document.createElement('div');
+    popularLabel.className = 'text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-1';
+    popularLabel.textContent = 'Font Populer';
+    popularSection.appendChild(popularLabel);
+    
+    popularFonts.forEach(font => {
+        // Skip if already in recent
+        if (!recentFonts.includes(font)) {
+            popularSection.appendChild(createFontOption(font, fontList));
+        }
+    });
+    
+    fontList.appendChild(popularSection);
+    
+    // Store all fonts for search
+    if (allFonts) {
+        fontList.setAttribute('data-all-fonts', JSON.stringify(allFonts));
+    }
+}
+
+// Load Google Fonts with cache
+async function loadGoogleFonts() {
+    const fontList = document.getElementById('font-family-list');
+    if (!fontList) return;
+    
+    // If already rendered, don't reload
+    if (fontList.children.length > 0) return;
+    
+    // Get recent and popular fonts
+    const recentFonts = getRecentFonts();
+    const popularFonts = getPopularFonts();
+    
+    // Try to get from cache first
+    let allFonts = getAllFontsFromCache();
+    
+    if (!allFonts) {
+        try {
+            // Fetch from Google Fonts API
+            const response = await fetch('https://www.googleapis.com/webfonts/v1/webfonts?sort=popularity');
+            const data = await response.json();
+            allFonts = data.items || [];
+            saveAllFontsToCache(allFonts);
+            
+            // Update popular fonts from fetched data (first 15 most popular)
+            if (allFonts.length > 0) {
+                const fetchedPopular = allFonts.slice(0, 15).map(font => font.family);
+                // Ensure Times New Roman and other system fonts are included
+                const systemFonts = ['Times New Roman', 'Arial', 'Helvetica', 'Georgia', 'Verdana', 'Courier New', 'Comic Sans MS'];
+                systemFonts.forEach(font => {
+                    if (!fetchedPopular.includes(font)) {
+                        fetchedPopular.push(font);
+                    }
+                });
+                // Keep only 15
+                const finalPopular = fetchedPopular.slice(0, 15);
+                savePopularFonts(finalPopular);
+                // Update local variable
+                popularFonts.splice(0, popularFonts.length, ...finalPopular);
+            }
+        } catch (error) {
+            console.error('Error loading Google Fonts:', error);
+            allFonts = [];
+        }
+    }
+    
+    // Render with recent and popular fonts
+    renderFontList(fontList, recentFonts, popularFonts, allFonts);
+}
+
+// Filter fonts based on search (show 8 recommendations)
+function filterFonts(searchTerm) {
+    const fontList = document.getElementById('font-family-list');
+    if (!fontList) return;
+    
+    const term = searchTerm.toLowerCase().trim();
+    
+    // If search is empty, show recent + popular
+    if (!term) {
+        const fontOptions = document.querySelectorAll('.font-option');
+        fontOptions.forEach(option => {
+            option.style.display = 'block';
+        });
+        // Show all sections
+        fontList.querySelectorAll('.text-xs').forEach(label => {
+            label.parentElement.style.display = 'block';
+        });
+        fontList.querySelectorAll('.border-t').forEach(separator => {
+            separator.style.display = 'block';
+        });
+        return;
+    }
+    
+    // Get all fonts from cache
+    const allFontsData = fontList.getAttribute('data-all-fonts');
+    if (!allFontsData) {
+        // If no cache, just filter existing options
+        const fontOptions = document.querySelectorAll('.font-option');
+        let visibleCount = 0;
+        fontOptions.forEach(option => {
+            const fontName = option.textContent.toLowerCase();
+            if (fontName.includes(term) && visibleCount < 8) {
+                option.style.display = 'block';
+                visibleCount++;
+            } else {
+                option.style.display = 'none';
+            }
+        });
+        // Hide sections and separators
+        fontList.querySelectorAll('.text-xs').forEach(label => {
+            label.parentElement.style.display = 'none';
+        });
+        fontList.querySelectorAll('.border-t').forEach(separator => {
+            separator.style.display = 'none';
+        });
+        return;
+    }
+    
+    try {
+        const allFonts = JSON.parse(allFontsData);
+        
+        // Filter fonts that match search term
+        const matchingFonts = allFonts
+            .filter(font => font.family.toLowerCase().includes(term))
+            .slice(0, 8); // Limit to 8 recommendations
+        
+        // Clear and render recommendations
+        fontList.innerHTML = '';
+        
+        if (matchingFonts.length > 0) {
+            const recommendationsLabel = document.createElement('div');
+            recommendationsLabel.className = 'text-xs font-semibold text-gray-500 uppercase tracking-wide px-3 py-1';
+            recommendationsLabel.textContent = 'Rekomendasi';
+            fontList.appendChild(recommendationsLabel);
+            
+            matchingFonts.forEach(font => {
+                fontList.appendChild(createFontOption(font.family, fontList));
+            });
+        } else {
+            const noResults = document.createElement('div');
+            noResults.className = 'text-sm text-gray-500 px-3 py-4 text-center';
+            noResults.textContent = 'Tidak ada font yang ditemukan';
+            fontList.appendChild(noResults);
+        }
+    } catch (e) {
+        console.error('Error filtering fonts:', e);
+    }
+}
+
+// Reset card formatting to default (FE ONLY)
+function resetCardFormatting() {
+    // Use stored activeInputElement instead of document.activeElement
+    // This ensures reset works even when user clicks toolbar (which causes blur)
+    if (!activeInputElement) return;
+
+    const activeInput = activeInputElement;
+
+    // Reset to default values
+    const defaults = {
+        textAlign: 'left',
+        fontFamily: 'Arial',
+        fontSize: 12,
+        fontWeight: 'normal',
+        fontStyle: 'normal',
+        textDecoration: 'none'
+    };
+
+    // Update state
+    cardFormattingState = { ...defaults };
+
+    // Apply default formatting
+    activeInput.style.textAlign = defaults.textAlign;
+    activeInput.style.fontFamily = defaults.fontFamily;
+    activeInput.style.fontSize = `${defaults.fontSize}px`;
+    activeInput.style.fontWeight = defaults.fontWeight;
+    activeInput.style.fontStyle = defaults.fontStyle;
+    activeInput.style.textDecoration = defaults.textDecoration;
+
+    // Update displays
+    updateFontSizeDisplay(defaults.fontSize);
+    updateFontFamilyDisplay(defaults.fontFamily);
+    updateTextAlignIcon(defaults.textAlign);
+
+    // Update manual input
+    const fontSizeManualInput = document.querySelector('#font-size-manual');
+    if (fontSizeManualInput) {
+        fontSizeManualInput.value = defaults.fontSize;
+    }
+
+    // Remove active states from buttons
+    const toolbar = document.getElementById('card-formatting-toolbar');
+    if (toolbar) {
+        toolbar.querySelectorAll('.bg-red-100').forEach(btn => {
+            btn.classList.remove('bg-red-100');
+        });
+    }
+
+    // Remove data attributes
+    const parentCard = activeInput.closest('.question-card, .section-divider, .bg-white.rounded-lg');
+    Object.keys(defaults).forEach(key => {
+        if (parentCard) {
+            parentCard.removeAttribute(`data-${key}`);
+        } else {
+            activeInput.removeAttribute(`data-${key}`);
+        }
     });
 }

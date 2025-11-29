@@ -56,16 +56,161 @@ $responsesStats = $responsesStats ?? [
     <!-- Tab Bar -->
     <div class="bg-white border-b border-gray-200 sticky top-16 z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex space-x-8">
-                <button class="tab-btn active px-4 py-3 text-sm font-medium text-red-600 border-b-2 border-red-600 transition-colors" data-tab="questions">
-                    Pertanyaan
-                </button>
-                <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="responses">
-                    Jawaban
-                </button>
-                <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="settings">
-                    Setelan
-                </button>
+            <div class="flex items-center justify-between">
+                <!-- Tab Buttons -->
+                <div class="flex space-x-8">
+                    <button class="tab-btn active px-4 py-3 text-sm font-medium text-red-600 border-b-2 border-red-600 transition-colors" data-tab="questions">
+                        Pertanyaan
+                    </button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="responses">
+                        Jawaban
+                    </button>
+                    <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-red-600 hover:border-red-300 transition-colors" data-tab="settings">
+                        Setelan
+                    </button>
+                </div>
+                
+                <!-- Card Formatting Toolbar (appears when card is active) -->
+                <div id="card-formatting-toolbar" class="flex items-center space-x-1 opacity-0 pointer-events-none transition-opacity duration-200 bg-gray-50 rounded-lg px-2 py-1">
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Text Alignment -->
+                    <div class="relative group">
+                        <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Perataan Teks" data-tool="text-align">
+                            <svg id="text-align-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8M4 18h8"></path>
+                            </svg>
+                        </button>
+                        <div class="card-toolbar-dropdown hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1 z-50 min-w-[160px]">
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="left">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8M4 18h8"></path>
+                                </svg>
+                                <span>Rata Kiri</span>
+                            </button>
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6h12M4 10h16M6 14h12M4 18h16"></path>
+                                </svg>
+                                <span>Rata Tengah</span>
+                            </button>
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="right">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M12 17.25h8.25" />
+                                </svg>
+                                <span>Rata Kanan</span>
+                            </button>
+                            <button class="text-align-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded flex items-center space-x-2" data-value="justify">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+                                </svg>
+                                <span>Rata Kiri Kanan</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Font Family -->
+                    <div class="relative group">
+                        <button class="card-toolbar-btn px-3 py-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors text-sm font-medium" title="Font" data-tool="font-family">
+                            <span class="font-family-display">Arial</span>
+                            <svg class="w-4 h-4 inline-block ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        <div class="card-toolbar-dropdown hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[220px] max-h-[300px] overflow-y-auto">
+                            <input type="text" id="font-family-search-input" placeholder="Cari font..." class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg mb-2 focus:outline-none focus:ring-1 focus:ring-red-500 relative z-10">
+                            <div id="font-family-list" class="space-y-1">
+                                <!-- Font options will be loaded dynamically from Google Fonts -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Font Size (Manual Input + Template) -->
+                    <div class="flex items-center space-x-1">
+                        <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Kurangi Ukuran" data-action="decrease-size">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+                            </svg>
+                        </button>
+                        <div class="relative group">
+                            <button class="card-toolbar-btn px-2 py-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors text-sm font-medium min-w-[50px]" title="Ukuran Font" data-tool="font-size">
+                                <span class="font-size-display">12</span>
+                                <svg class="w-3 h-3 inline-block ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </button>
+                            <div class="card-toolbar-dropdown hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[180px]">
+                                <div class="mb-2">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Ukuran Manual</label>
+                                    <input type="number" id="font-size-manual" min="8" max="72" value="12" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-red-500">
+                                </div>
+                                <div class="border-t border-gray-200 pt-2 mt-2">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">Template</label>
+                                    <div class="space-y-1">
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="10">
+                                            <span style="font-size: 10px;">Sangat Kecil (10px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="12">
+                                            <span style="font-size: 12px;">Kecil (12px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="14">
+                                            <span style="font-size: 14px;">Normal (14px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="16">
+                                            <span style="font-size: 16px;">Besar (16px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="18">
+                                            <span style="font-size: 18px;">Sangat Besar (18px)</span>
+                                        </button>
+                                        <button class="font-size-template-option w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded" data-value="24">
+                                            <span style="font-size: 24px;">Judul (24px)</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Tambah Ukuran" data-action="increase-size">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Text Decoration: Bold -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Tebal (Bold)" data-action="bold">
+                        <span class="font-bold text-base">B</span>
+                    </button>
+                    
+                    <!-- Text Decoration: Italic -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Miring (Italic)" data-action="italic">
+                        <span class="italic text-base">I</span>
+                    </button>
+                    
+                    <!-- Text Decoration: Underline -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Garis Bawah (Underline)" data-action="underline">
+                        <span class="underline text-base">U</span>
+                    </button>
+                    
+                    <!-- Separator -->
+                    <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <!-- Reset Button -->
+                    <button class="card-toolbar-btn p-2 text-gray-700 hover:text-red-600 hover:bg-white rounded transition-colors" title="Reset ke Default" data-action="reset-formatting">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -78,20 +223,24 @@ $responsesStats = $responsesStats ?? [
                 <div class="p-6">
                     <!-- Title Input -->
                     <div class="mb-4">
-                        <input
-                            type="text"
-                            placeholder="Judul formulir tanpa judul"
-                            class="w-full text-2xl font-normal text-gray-900 border-none outline-none focus:ring-0 placeholder-gray-400 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors"
-                            id="form-title">
+                        <div
+                            contenteditable="true"
+                            data-placeholder="Judul formulir tanpa judul"
+                            class="w-full text-2xl font-normal text-gray-900 border-none outline-none focus:ring-0 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+                            id="form-title"
+                            style="min-height: 1.5em;"
+                        ></div>
                     </div>
 
                     <!-- Description Input -->
                     <div>
-                        <input
-                            type="text"
-                            placeholder="Deskripsi formulir"
-                            class="w-full text-sm text-gray-600 border-none outline-none focus:ring-0 placeholder-gray-400 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors"
-                            id="form-description">
+                        <div
+                            contenteditable="true"
+                            data-placeholder="Deskripsi formulir"
+                            class="w-full text-sm text-gray-600 border-none outline-none focus:ring-0 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+                            id="form-description"
+                            style="min-height: 1.5em;"
+                        ></div>
                     </div>
                 </div>
             </div>
