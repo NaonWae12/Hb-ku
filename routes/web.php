@@ -30,6 +30,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/forms/{form}/answer-templates/{template}', [FormController::class, 'destroyAnswerTemplate'])->name('forms.answer-templates.destroy');
     Route::delete('/forms/{form}/result-rules/{rule}', [FormController::class, 'destroyResultRule'])->name('forms.result-rules.destroy');
     Route::post('/forms/{form}/rules', [FormController::class, 'updateRules'])->name('forms.rules.store');
+    Route::delete('/forms/{form}/setting-results/{ruleGroupId}', [FormController::class, 'destroySettingResultsByGroup'])->name('forms.setting-results.destroy-group');
 });
 
 require __DIR__.'/auth.php';

@@ -1445,6 +1445,33 @@ class FormController extends Controller
     }
 
     /**
+     * Hapus hanya setting_results untuk satu rule_group_id (tanpa menghapus rule/rule_groups).
+     */
+    public function destroySettingResultsByGroup(Request $request, Form $form, string $ruleGroupId)
+    {
+        if ($form->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        // Hanya hapus entries setting_results milik form & rule_group_id terkait
+        $deleted = SettingResult::where('form_id', $form->id)
+            ->where('rule_group_id', $ruleGroupId)
+            ->delete();
+
+        Log::info('destroySettingResultsByGroup()', [
+            'form_id' => $form->id,
+            'rule_group_id' => $ruleGroupId,
+            'deleted_count' => $deleted,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Setup hasil dihapus (setting_results) tanpa menghapus aturan.',
+            'deleted' => $deleted,
+        ]);
+    }
+
+    /**
      * Sync result text settings (new structure with title and image per text)
      */
     private function syncSettingResults(Form $form, array $payload): void

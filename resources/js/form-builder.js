@@ -1625,10 +1625,47 @@ function attachResultSettingEvents(card) {
     updateImageAlignment();
     updateTextAlignment();
 
-    // Delete card
+    // Delete card (only delete setting_results on server, keep rules)
     if (deleteBtn) {
-        deleteBtn.addEventListener('click', function() {
-            card.remove();
+        deleteBtn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const selectedOption = ruleSelect?.selectedOptions?.[0] || null;
+            const ruleGroupId = selectedOption ? selectedOption.getAttribute('data-rule-group-id') : null;
+            
+            // If no rule group selected, just remove the card locally
+            if (!ruleGroupId) {
+                card.remove();
+                return;
+            }
+            
+            const formId = document.getElementById('form-builder-root')?.getAttribute('data-form-id');
+            if (!formId) {
+                card.remove();
+                return;
+            }
+            
+            const csrfToken = getMetaContent('csrf-token');
+            const url = `/forms/${formId}/setting-results/${encodeURIComponent(ruleGroupId)}`;
+            
+            try {
+                const res = await fetch(url, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json',
+                    },
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || 'Gagal menghapus setup hasil.');
+                }
+            } catch (err) {
+                console.warn('[ResultSetting] Delete failed, removing locally only:', err);
+            } finally {
+                // Remove the card from UI regardless, since rules remain usable later
+                card.remove();
+            }
         });
     }
     
