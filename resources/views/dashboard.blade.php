@@ -3,7 +3,7 @@
 @section('title', 'Dashboard - hb-ku')
 
 @section('content')
-<div class="min-h-screen bg-gray-50">
+<div class="min-h-screen bg-cover bg-center bg-no-repeat" style="background-image: url('{{ asset('assets/images/background.jpg') }}');">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         <!-- Summary Statistics -->

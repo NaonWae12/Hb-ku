@@ -10,8 +10,8 @@ $responsesStats = $responsesStats ?? [
 'latest_response_at' => null,
 ];
 @endphp
-<div class="min-h-screen bg-gray-50" id="form-builder-root"
-    data-initial='@json($formData ?? null)'
+<div class="min-h-screen bg-rose-50" id="form-builder-root"
+    data-initial='@json($formData ? array_merge($formData, ['rule_groups' => $formData['rule_groups'] ?? []]) : ['rule_groups' => []])'
     data-mode="{{ $formMode ?? 'create' }}"
     data-form-id="{{ $formId }}"
     data-share-url="{{ $shareUrl ?? '' }}"

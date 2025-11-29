@@ -1202,9 +1202,11 @@ function createResultSettingCard() {
     if (initialDataAttr) {
         try {
             const initialData = JSON.parse(initialDataAttr);
-            ruleGroupsData = initialData.rule_groups || {};
+            // Safely access rule_groups, default to empty object if null/undefined
+            ruleGroupsData = (initialData && initialData.rule_groups) ? initialData.rule_groups : {};
         } catch (e) {
             console.warn('Failed to parse initial data:', e);
+            ruleGroupsData = {};
         }
     }
     
@@ -3631,7 +3633,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <span class="text-sm font-medium">Menyimpan...</span>
             `;
             
-            const formData = collectFormData();
+            const formData = collectFormData({ includeRules: false });
             const csrfToken = getMetaContent('csrf-token');
 
             const savedRules = loadSavedRules();
@@ -4232,7 +4234,9 @@ function updateSectionNumbers() {
 }
 
 // Fungsi untuk mengumpulkan data form
-function collectFormData() {
+function collectFormData(options = {}) {
+    const { includeRules = true } = options;
+
     const formData = {
         title: document.getElementById('form-title')?.value || 'Formulir tanpa judul',
         description: document.getElementById('form-description')?.value || '',
@@ -4269,78 +4273,80 @@ function collectFormData() {
         });
     });
 
-    // Generate rule_group_id untuk mengelompokkan semua aturan form yang satu paket
-    const generateRuleGroupId = () => {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-            const r = Math.random() * 16 | 0;
-            const v = c === 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
-    };
-
-    // Collect answer templates (pastikan query selector menemukan elemen meskipun tab tersembunyi)
-    const answerTemplates = document.querySelectorAll('.answer-template-card');
-    const resultRulesElements = document.querySelectorAll('.result-rule-card');
-    const hasAnswerTemplates = answerTemplates.length > 0;
-    const hasResultRules = resultRulesElements.length > 0;
-    
-    // Cari rule_group_id yang sudah ada dari card pertama (jika edit mode)
-    let existingRuleGroupId = null;
-    if (answerTemplates.length > 0) {
-        const firstTemplate = answerTemplates[0];
-        existingRuleGroupId = firstTemplate.getAttribute('data-rule-group-id');
-    }
-    if (!existingRuleGroupId && hasResultRules) {
-        const firstRule = document.querySelector('.result-rule-card');
-        if (firstRule) {
-            existingRuleGroupId = firstRule.getAttribute('data-rule-group-id');
-        }
-    }
-    
-    // Gunakan rule_group_id yang sudah ada jika ada, atau generate baru
-    const ruleGroupId = existingRuleGroupId || ((hasAnswerTemplates || hasResultRules) ? generateRuleGroupId() : null);
-
-    answerTemplates.forEach((template) => {
-        const answerText = template.querySelector('.answer-template-text')?.value;
-        const score = template.querySelector('.answer-template-score')?.value || 0;
-        if (answerText) {
-            formData.answer_templates.push({
-                answer_text: answerText,
-                score: parseInt(score) || 0,
-                rule_group_id: ruleGroupId
+    if (includeRules) {
+        // Generate rule_group_id untuk mengelompokkan semua aturan form yang satu paket
+        const generateRuleGroupId = () => {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
             });
-        }
-    });
-
-    // Collect result rules
-    const resultRules = document.querySelectorAll('.result-rule-card');
-    resultRules.forEach((ruleCard) => {
-        const conditionType = ruleCard.querySelector('.rule-condition-type')?.value || 'range';
-        const ruleData = {
-            condition_type: conditionType,
-            texts: [],
-            rule_group_id: ruleGroupId
         };
 
-        if (conditionType === 'range') {
-            ruleData.min_score = parseInt(ruleCard.querySelector('.rule-min-score')?.value) || null;
-            ruleData.max_score = parseInt(ruleCard.querySelector('.rule-max-score')?.value) || null;
-        } else {
-            ruleData.single_score = parseInt(ruleCard.querySelector('.rule-single-score')?.value) || null;
+        // Collect answer templates (pastikan query selector menemukan elemen meskipun tab tersembunyi)
+        const answerTemplates = document.querySelectorAll('.answer-template-card');
+        const resultRulesElements = document.querySelectorAll('.result-rule-card');
+        const hasAnswerTemplates = answerTemplates.length > 0;
+        const hasResultRules = resultRulesElements.length > 0;
+        
+        // Cari rule_group_id yang sudah ada dari card pertama (jika edit mode)
+        let existingRuleGroupId = null;
+        if (answerTemplates.length > 0) {
+            const firstTemplate = answerTemplates[0];
+            existingRuleGroupId = firstTemplate.getAttribute('data-rule-group-id');
         }
+        if (!existingRuleGroupId && hasResultRules) {
+            const firstRule = document.querySelector('.result-rule-card');
+            if (firstRule) {
+                existingRuleGroupId = firstRule.getAttribute('data-rule-group-id');
+            }
+        }
+        
+        // Gunakan rule_group_id yang sudah ada jika ada, atau generate baru
+        const ruleGroupId = existingRuleGroupId || ((hasAnswerTemplates || hasResultRules) ? generateRuleGroupId() : null);
 
-        // Collect result texts
-        const textAreas = ruleCard.querySelectorAll('.rule-result-text');
-        textAreas.forEach((textarea) => {
-            if (textarea.value.trim()) {
-                ruleData.texts.push(textarea.value.trim());
+        answerTemplates.forEach((template) => {
+            const answerText = template.querySelector('.answer-template-text')?.value;
+            const score = template.querySelector('.answer-template-score')?.value || 0;
+            if (answerText) {
+                formData.answer_templates.push({
+                    answer_text: answerText,
+                    score: parseInt(score) || 0,
+                    rule_group_id: ruleGroupId
+                });
             }
         });
 
-        if (ruleData.texts.length > 0) {
-            formData.result_rules.push(ruleData);
-        }
-    });
+        // Collect result rules
+        const resultRules = document.querySelectorAll('.result-rule-card');
+        resultRules.forEach((ruleCard) => {
+            const conditionType = ruleCard.querySelector('.rule-condition-type')?.value || 'range';
+            const ruleData = {
+                condition_type: conditionType,
+                texts: [],
+                rule_group_id: ruleGroupId
+            };
+
+            if (conditionType === 'range') {
+                ruleData.min_score = parseInt(ruleCard.querySelector('.rule-min-score')?.value) || null;
+                ruleData.max_score = parseInt(ruleCard.querySelector('.rule-max-score')?.value) || null;
+            } else {
+                ruleData.single_score = parseInt(ruleCard.querySelector('.rule-single-score')?.value) || null;
+            }
+
+            // Collect result texts
+            const textAreas = ruleCard.querySelectorAll('.rule-result-text');
+            textAreas.forEach((textarea) => {
+                if (textarea.value.trim()) {
+                    ruleData.texts.push(textarea.value.trim());
+                }
+            });
+
+            if (ruleData.texts.length > 0) {
+                formData.result_rules.push(ruleData);
+            }
+        });
+    }
 
     // Collect questions from questions container
     const questionsContainer = document.getElementById('questions-container');

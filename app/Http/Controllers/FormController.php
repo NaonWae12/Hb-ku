@@ -214,9 +214,49 @@ class FormController extends Controller
             $questionsInput = $request->input('questions', []);
             $resultTextSettingsInput = $request->input('result_text_settings', []);
 
-            $hasRulePayload = $this->arrayHasContent($answerTemplatesInput)
-                || $this->arrayHasContent($resultRulesInput)
-                || $this->arrayHasContent($resultTextSettingsInput);
+            // Log initial state before any changes
+            $initialRuleGroupsCount = $form->ruleGroups()->count();
+            $initialRuleGroups = $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray();
+
+            Log::info('=== FORM UPDATE START ===', [
+                'form_id' => $form->id,
+                'initial_rule_groups_count' => $initialRuleGroupsCount,
+                'initial_rule_groups' => $initialRuleGroups,
+                'payload' => [
+                    'sections_count' => count($sectionsInput),
+                    'answer_templates_count' => count($answerTemplatesInput),
+                    'result_rules_count' => count($resultRulesInput),
+                    'questions_count' => count($questionsInput),
+                    'result_text_settings_count' => count($resultTextSettingsInput),
+                    'answer_templates_sample' => array_slice($answerTemplatesInput, 0, 2),
+                    'result_rules_sample' => array_slice($resultRulesInput, 0, 2),
+                    'result_text_settings_sample' => array_slice($resultTextSettingsInput, 0, 2),
+                ],
+            ]);
+
+            // Only reset rules if we have actual rule data to sync
+            // Check if arrays are not empty AND contain valid data
+            $hasAnswerTemplates = !empty($answerTemplatesInput) && $this->arrayHasContent($answerTemplatesInput);
+            $hasResultRules = !empty($resultRulesInput) && $this->arrayHasContent($resultRulesInput);
+            $hasResultTextSettings = !empty($resultTextSettingsInput) && $this->arrayHasContent($resultTextSettingsInput);
+
+            // IMPORTANT: Only reset rules if answer_templates or result_rules changed
+            // result_text_settings does NOT require rule reset because it only affects setting_results table
+            $hasRulePayload = $hasAnswerTemplates || $hasResultRules;
+
+            Log::info('Rule payload check', [
+                'form_id' => $form->id,
+                'has_answer_templates' => $hasAnswerTemplates,
+                'has_result_rules' => $hasResultRules,
+                'has_result_text_settings' => $hasResultTextSettings,
+                'has_rule_payload' => $hasRulePayload,
+                'note' => 'result_text_settings does NOT trigger rule reset',
+                'array_has_content_check' => [
+                    'answer_templates' => $this->arrayHasContent($answerTemplatesInput),
+                    'result_rules' => $this->arrayHasContent($resultRulesInput),
+                    'result_text_settings' => $this->arrayHasContent($resultTextSettingsInput),
+                ],
+            ]);
 
             $form->update([
                 'title' => $request->title,
@@ -230,12 +270,45 @@ class FormController extends Controller
 
             if ($hasRulePayload) {
                 // Hapus semua aturan form sebelum sinkronisasi ulang
+                Log::warning('⚠️ RESETTING FORM RULES - This will delete rule_groups!', [
+                    'form_id' => $form->id,
+                    'has_answer_templates' => !empty($answerTemplatesInput),
+                    'has_result_rules' => !empty($resultRulesInput),
+                    'has_result_text_settings' => !empty($resultTextSettingsInput),
+                    'rule_groups_before_delete' => $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray(),
+                ]);
                 $this->resetFormRules($form);
+
+                // Verify deletion
+                $ruleGroupsAfterDelete = $form->ruleGroups()->count();
+                Log::warning('⚠️ Rule groups after resetFormRules()', [
+                    'form_id' => $form->id,
+                    'rule_groups_count' => $ruleGroupsAfterDelete,
+                ]);
+            } else {
+                Log::info('✅ Skipping rule reset - no rule payload (answer_templates or result_rules)', [
+                    'form_id' => $form->id,
+                    'answer_templates_count' => count($answerTemplatesInput),
+                    'result_rules_count' => count($resultRulesInput),
+                    'result_text_settings_count' => count($resultTextSettingsInput),
+                    'note' => 'result_text_settings does NOT trigger rule reset',
+                ]);
             }
 
             // Hapus questions dan sections setelah menghapus dependencies
             $form->questions()->delete();
             $form->sections()->delete();
+
+            Log::info('Calling syncFormRelations()', [
+                'form_id' => $form->id,
+                'payload_summary' => [
+                    'sections_count' => count($sectionsInput),
+                    'answer_templates_count' => count($answerTemplatesInput),
+                    'result_rules_count' => count($resultRulesInput),
+                    'questions_count' => count($questionsInput),
+                    'result_text_settings_count' => count($resultTextSettingsInput),
+                ],
+            ]);
 
             $this->syncFormRelations($form, [
                 'sections' => $sectionsInput,
@@ -243,6 +316,21 @@ class FormController extends Controller
                 'result_rules' => $resultRulesInput,
                 'questions' => $questionsInput,
                 'result_text_settings' => $resultTextSettingsInput,
+            ]);
+
+            // Log final state after sync
+            $finalRuleGroupsCount = $form->ruleGroups()->count();
+            $finalRuleGroups = $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray();
+
+            Log::info('=== FORM UPDATE END ===', [
+                'form_id' => $form->id,
+                'final_rule_groups_count' => $finalRuleGroupsCount,
+                'final_rule_groups' => $finalRuleGroups,
+                'rule_groups_lost' => $initialRuleGroupsCount - $finalRuleGroupsCount,
+                'initial_vs_final' => [
+                    'initial_count' => $initialRuleGroupsCount,
+                    'final_count' => $finalRuleGroupsCount,
+                ],
             ]);
 
             DB::commit();
@@ -720,6 +808,19 @@ class FormController extends Controller
      */
     private function syncFormRelations(Form $form, array $payload): void
     {
+        Log::info('syncFormRelations() - Start', [
+            'form_id' => $form->id,
+            'payload_keys' => array_keys($payload),
+            'payload_counts' => [
+                'sections' => count($payload['sections'] ?? []),
+                'answer_templates' => count($payload['answer_templates'] ?? []),
+                'result_rules' => count($payload['result_rules'] ?? []),
+                'questions' => count($payload['questions'] ?? []),
+                'result_text_settings' => count($payload['result_text_settings'] ?? []),
+            ],
+            'rule_groups_before_sync' => $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray(),
+        ]);
+
         $sectionIdMap = [];
         $sections = $payload['sections'] ?? [];
 
@@ -740,7 +841,39 @@ class FormController extends Controller
             $sectionIdMap[$index] = $section->id;
         }
 
-        $rulesContext = $this->persistFormRules($form, $payload);
+        // Only persist rules if we have actual rule data
+        // This prevents accidental deletion of rule_groups when updating form without rule changes
+        $hasRuleData = (!empty($payload['answer_templates']) && $this->arrayHasContent($payload['answer_templates']))
+            || (!empty($payload['result_rules']) && $this->arrayHasContent($payload['result_rules']));
+
+        Log::info('syncFormRelations() - Rule data check', [
+            'form_id' => $form->id,
+            'has_rule_data' => $hasRuleData,
+            'answer_templates_empty' => empty($payload['answer_templates']),
+            'answer_templates_has_content' => $this->arrayHasContent($payload['answer_templates'] ?? []),
+            'result_rules_empty' => empty($payload['result_rules']),
+            'result_rules_has_content' => $this->arrayHasContent($payload['result_rules'] ?? []),
+        ]);
+
+        $rulesContext = [];
+        if ($hasRuleData) {
+            Log::info('syncFormRelations() - Calling persistFormRules()', ['form_id' => $form->id]);
+            $rulesContext = $this->persistFormRules($form, $payload);
+
+            // After persisting rules, ensure rule_groups exist for all rule_group_id values
+            // This is important because rule_groups might have been deleted by resetFormRules()
+            $this->ensureRuleGroupsExist($form);
+        } else {
+            Log::info('syncFormRelations() - Skipping persistFormRules() - no rule data', ['form_id' => $form->id]);
+            // Return empty maps to prevent errors in question creation
+            $rulesContext = [
+                'answer_template_id_map' => [],
+                'answer_template_lookup' => [],
+                'next_template_order' => (int) ($form->answerTemplates()->max('order') ?? -1) + 1,
+                'result_rule_id_map' => [],
+            ];
+        }
+
         $answerTemplateIdMap = $rulesContext['answer_template_id_map'];
         $answerTemplateLookup = $rulesContext['answer_template_lookup'];
         $nextTemplateOrder = $rulesContext['next_template_order'];
@@ -826,7 +959,26 @@ class FormController extends Controller
             }
         }
 
-        $this->syncSettingResults($form, $payload);
+        // Only sync setting results if we have valid data
+        // This prevents accidental deletion of rule_groups when updating form without changing result settings
+        $hasResultTextSettings = !empty($payload['result_text_settings']) && $this->arrayHasContent($payload['result_text_settings']);
+        if ($hasResultTextSettings) {
+            Log::info('syncFormRelations() - Calling syncSettingResults()', ['form_id' => $form->id]);
+            $this->syncSettingResults($form, $payload);
+        } else {
+            Log::info('syncFormRelations() - Skipping syncSettingResults() - no valid payload', [
+                'form_id' => $form->id,
+                'result_text_settings_count' => count($payload['result_text_settings'] ?? []),
+            ]);
+        }
+
+        // Log final state after sync
+        $ruleGroupsAfterSync = $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray();
+        Log::info('syncFormRelations() - End', [
+            'form_id' => $form->id,
+            'rule_groups_after_sync' => $ruleGroupsAfterSync,
+            'rule_groups_count_after_sync' => count($ruleGroupsAfterSync),
+        ]);
     }
 
     /**
@@ -966,11 +1118,13 @@ class FormController extends Controller
         $ruleGroupsCollection = $form->ruleGroups()->get()->keyBy('rule_group_id');
 
         // Build result setting cards data purely from setting_results table
-        $resultSettingsData = SettingResult::where('form_id', $form->id)
+        $settingResultsCollection = SettingResult::where('form_id', $form->id)
             ->whereNotNull('rule_group_id')
             ->orderBy('card_order')
             ->orderBy('order')
-            ->get()
+            ->get();
+
+        $resultSettingsData = $settingResultsCollection
             ->groupBy('rule_group_id')
             ->map(function ($settings, $ruleGroupId) use ($ruleGroupTextSettings, $ruleGroupsCollection) {
                 $textSettings = $ruleGroupTextSettings->get($ruleGroupId) ?? [];
@@ -980,7 +1134,7 @@ class FormController extends Controller
                 return [
                     'result_rule_id' => null,
                     'rule_group_id' => $ruleGroupId,
-                    'title' => $ruleGroup ? $ruleGroup->title : null,
+                    'title' => $ruleGroup ? $ruleGroup->title : ($firstSetting->card_title ?? null),
                     'image' => $firstSetting->card_image ?? null,
                     'image_alignment' => $firstSetting->image_alignment ?? 'center',
                     'result_text' => null,
@@ -996,11 +1150,28 @@ class FormController extends Controller
             ->toArray();
 
         // Get rule_groups data for frontend
+        // Structure: { rule_group_id: title, ... }
         $ruleGroupsData = $ruleGroupsCollection
-            ->map(function ($ruleGroup) {
-                return $ruleGroup->title;
+            ->mapWithKeys(function ($ruleGroup) {
+                return [$ruleGroup->rule_group_id => $ruleGroup->title];
             })
             ->toArray();
+
+        // Fill missing titles from setting_results card_title fallback
+        $fallbackRuleGroupTitles = $settingResultsCollection
+            ->filter(function ($setting) {
+                return $setting->rule_group_id && $setting->card_title;
+            })
+            ->mapWithKeys(function ($setting) {
+                return [$setting->rule_group_id => $setting->card_title];
+            })
+            ->toArray();
+
+        foreach ($fallbackRuleGroupTitles as $ruleGroupId => $cardTitle) {
+            if (!isset($ruleGroupsData[$ruleGroupId]) || !$ruleGroupsData[$ruleGroupId]) {
+                $ruleGroupsData[$ruleGroupId] = $cardTitle;
+            }
+        }
 
         return [
             'id' => $form->id,
@@ -1089,6 +1260,15 @@ class FormController extends Controller
         ?int $ruleOrderOverride = null,
         ?string $ruleGroupId = null
     ): array {
+        Log::info('persistFormRules() - Start', [
+            'form_id' => $form->id,
+            'append' => $append,
+            'rule_group_id' => $ruleGroupId,
+            'answer_templates_count' => count($payload['answer_templates'] ?? []),
+            'result_rules_count' => count($payload['result_rules'] ?? []),
+            'rule_groups_before' => $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray(),
+        ]);
+
         $answerTemplateIdMap = [];
         $answerTemplateLookup = [];
         $answerTemplates = $payload['answer_templates'] ?? [];
@@ -1180,6 +1360,16 @@ class FormController extends Controller
             }
         }
 
+        // Log final state after persist
+        $ruleGroupsAfterPersist = $form->ruleGroups()->pluck('rule_group_id', 'title')->toArray();
+        Log::info('persistFormRules() - End', [
+            'form_id' => $form->id,
+            'templates_created' => count($answerTemplateIdMap),
+            'rules_created' => count($resultRuleIdMap),
+            'rule_groups_after_persist' => $ruleGroupsAfterPersist,
+            'rule_groups_count_after_persist' => count($ruleGroupsAfterPersist),
+        ]);
+
         return [
             'answer_template_id_map' => $answerTemplateIdMap,
             'answer_template_lookup' => $answerTemplateLookup,
@@ -1190,6 +1380,19 @@ class FormController extends Controller
 
     private function resetFormRules(Form $form): void
     {
+        // Log what will be deleted
+        $ruleGroupsToDelete = DB::table('rule_groups')->where('form_id', $form->id)->get();
+        $answerTemplatesToDelete = DB::table('answer_templates')->where('form_id', $form->id)->count();
+        $resultRulesToDelete = DB::table('result_rules')->where('form_id', $form->id)->count();
+
+        Log::warning('🗑️ resetFormRules() - Deleting data', [
+            'form_id' => $form->id,
+            'rule_groups_to_delete' => $ruleGroupsToDelete->pluck('rule_group_id', 'title')->toArray(),
+            'rule_groups_count' => $ruleGroupsToDelete->count(),
+            'answer_templates_count' => $answerTemplatesToDelete,
+            'result_rules_count' => $resultRulesToDelete,
+        ]);
+
         DB::table('result_rule_texts')
             ->whereIn('result_rule_id', function ($query) use ($form) {
                 $query->select('id')
@@ -1201,6 +1404,13 @@ class FormController extends Controller
         DB::table('answer_templates')->where('form_id', $form->id)->delete();
         DB::table('result_rules')->where('form_id', $form->id)->delete();
         DB::table('rule_groups')->where('form_id', $form->id)->delete();
+
+        // Verify deletion
+        $ruleGroupsAfter = DB::table('rule_groups')->where('form_id', $form->id)->count();
+        Log::warning('🗑️ resetFormRules() - After deletion', [
+            'form_id' => $form->id,
+            'rule_groups_count_after' => $ruleGroupsAfter,
+        ]);
     }
 
     private function deleteRuleGroup(Form $form, string $ruleGroupId): array
@@ -1247,12 +1457,21 @@ class FormController extends Controller
             'result_text_settings' => $resultTextSettings,
         ]);
 
-        // Remove existing settings for the form to avoid duplicates
-        SettingResult::where('form_id', $form->id)->delete();
+        // Only remove existing settings if we have new data to sync
+        // This prevents accidental deletion when updating form without changing result settings
+        if (!empty($resultTextSettings) && $this->arrayHasContent($resultTextSettings)) {
+            SettingResult::where('form_id', $form->id)->delete();
+        } else {
+            Log::info('Skipping SettingResult deletion - no valid payload', [
+                'form_id' => $form->id,
+                'result_text_settings_count' => count($resultTextSettings),
+            ]);
+            return; // Exit early if no data to sync
+        }
 
         // Refresh form to ensure rules are loaded from database
         $form->refresh();
-        $form->load(['resultRules.texts']);
+        $form->load(['resultRules.texts', 'ruleGroups']);
 
         foreach ($resultTextSettings as $index => $settingData) {
             if (!is_array($settingData)) {
@@ -1278,6 +1497,8 @@ class FormController extends Controller
                 ->where('rule_group_id', $ruleGroupId)
                 ->with('texts')
                 ->get();
+            $ruleGroupTitle = optional($form->ruleGroups->firstWhere('rule_group_id', $ruleGroupId))->title
+                ?? ($settingData['card_title'] ?? null);
 
             Log::info('Found rules for rule_group_id', [
                 'rule_group_id' => $ruleGroupId,
@@ -1334,6 +1555,7 @@ class FormController extends Controller
                         'form_id' => $form->id,
                         'rule_group_id' => $ruleGroupId,
                         'result_rule_text_id' => $text->id,
+                        'card_title' => $ruleGroupTitle,
                         'title' => $ts['title'] ?? null,
                         'image' => $this->processQuestionImage($ts['image'] ?? null, $form),
                         'card_image' => $cardImagePath,
@@ -1369,6 +1591,7 @@ class FormController extends Controller
                         'form_id' => $form->id,
                         'rule_group_id' => $ruleGroupId,
                         'result_rule_text_id' => $text->id,
+                        'card_title' => $ruleGroupTitle,
                         'title' => null,
                         'image' => null,
                         'card_image' => $cardImagePath,
@@ -1407,6 +1630,93 @@ class FormController extends Controller
         }, $data['result_rules'] ?? []);
 
         return $ruleGroupId;
+    }
+
+    /**
+     * Ensure rule_groups exist for all rule_group_id values in answer_templates and result_rules.
+     * This is important after resetFormRules() to recreate rule_groups that were deleted.
+     */
+    private function ensureRuleGroupsExist(Form $form): void
+    {
+        // Get all unique rule_group_id from answer_templates and result_rules
+        $ruleGroupIds = $form->answerTemplates()
+            ->whereNotNull('rule_group_id')
+            ->distinct()
+            ->pluck('rule_group_id')
+            ->merge(
+                $form->resultRules()
+                    ->whereNotNull('rule_group_id')
+                    ->distinct()
+                    ->pluck('rule_group_id')
+            )
+            ->unique()
+            ->filter();
+
+        if ($ruleGroupIds->isEmpty()) {
+            Log::info('ensureRuleGroupsExist() - No rule_group_id found', ['form_id' => $form->id]);
+            return;
+        }
+
+        // Get existing rule_groups
+        $existingRuleGroups = $form->ruleGroups()
+            ->whereIn('rule_group_id', $ruleGroupIds)
+            ->pluck('rule_group_id')
+            ->toArray();
+
+        // Map fallback titles from setting_results (card_title)
+        $fallbackTitles = SettingResult::where('form_id', $form->id)
+            ->whereNotNull('rule_group_id')
+            ->pluck('card_title', 'rule_group_id')
+            ->filter(function ($title) {
+                return !empty($title);
+            })
+            ->toArray();
+
+        // Create missing rule_groups
+        $created = 0;
+        foreach ($ruleGroupIds as $ruleGroupId) {
+            if (!in_array($ruleGroupId, $existingRuleGroups)) {
+                // Prefer fallback title from setting_results, otherwise auto-generate
+                $existingCount = $form->ruleGroups()->count();
+                $title = $fallbackTitles[$ruleGroupId] ?? ('Aturan ' . ($existingCount + 1));
+
+                $form->ruleGroups()->create([
+                    'rule_group_id' => $ruleGroupId,
+                    'title' => $title,
+                ]);
+
+                $created++;
+                Log::info('ensureRuleGroupsExist() - Created rule_group', [
+                    'form_id' => $form->id,
+                    'rule_group_id' => $ruleGroupId,
+                    'title' => $title,
+                ]);
+            }
+        }
+
+        // Update existing rule_groups that miss titles but have fallbacks
+        if (!empty($fallbackTitles)) {
+            foreach ($fallbackTitles as $ruleGroupId => $cardTitle) {
+                if (!$cardTitle) {
+                    continue;
+                }
+
+                $form->ruleGroups()
+                    ->where('rule_group_id', $ruleGroupId)
+                    ->where(function ($query) {
+                        $query->whereNull('title')->orWhere('title', '');
+                    })
+                    ->update(['title' => $cardTitle]);
+            }
+        }
+
+        if ($created > 0) {
+            Log::info('ensureRuleGroupsExist() - Summary', [
+                'form_id' => $form->id,
+                'created' => $created,
+                'total_rule_group_ids' => $ruleGroupIds->count(),
+            ]);
+        }
     }
 
     private function arrayHasContent($value): bool

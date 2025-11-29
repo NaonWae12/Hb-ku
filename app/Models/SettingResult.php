@@ -12,6 +12,7 @@ class SettingResult extends Model
     protected $fillable = [
         'form_id',
         'rule_group_id',
+        'card_title',
         'result_rule_text_id',
         'title',
         'card_image',
