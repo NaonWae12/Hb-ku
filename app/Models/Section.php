@@ -32,4 +32,9 @@ class Section extends Model
     {
         return $this->hasMany(Question::class)->orderBy('order');
     }
+
+    public function textFormattings(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(FormTextFormatting::class);
+    }
 }

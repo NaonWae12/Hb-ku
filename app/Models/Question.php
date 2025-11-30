@@ -46,4 +46,9 @@ class Question extends Model
     {
         return $this->hasMany(ResponseAnswer::class);
     }
+
+    public function textFormatting(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(FormTextFormatting::class)->where('element_type', 'question_title');
+    }
 }

@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Responses - ' . $form->title)
+@section('title', 'Responses - ' . strip_tags($form->title))
 
 @section('content')
 <div class="py-10">
@@ -8,8 +8,8 @@
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
                 <p class="text-sm text-gray-500">Jawaban untuk</p>
-                <h1 class="text-3xl font-bold text-gray-900">{{ $form->title }}</h1>
-                <p class="text-sm text-gray-500 mt-1">{{ $form->description }}</p>
+                <h1 class="text-3xl font-bold text-gray-900">{{ strip_tags($form->title) }}</h1>
+                <p class="text-sm text-gray-500 mt-1">{{ strip_tags($form->description) }}</p>
             </div>
             <div class="flex items-center gap-3">
                 <a href="{{ route('dashboard') }}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100">

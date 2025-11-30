@@ -64,4 +64,14 @@ class Form extends Model
     {
         return $this->hasMany(RuleGroup::class);
     }
+
+    public function header(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(FormHeader::class);
+    }
+
+    public function textFormattings(): HasMany
+    {
+        return $this->hasMany(FormTextFormatting::class);
+    }
 }

@@ -545,7 +545,7 @@ function initSortable() {
     refreshDraggableElements(container);
 }
 
-function renderQuestionsIncrementally({ questions, sections, container, onComplete, batchSize = 3 }) {
+function renderQuestionsIncrementally({ questions, sections, container, onComplete, batchSize = 3, textFormattingMap = {} }) {
     const questionList = Array.isArray(questions) ? questions : [];
     const sectionList = Array.isArray(sections) ? sections : [];
 
@@ -581,13 +581,32 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
             const sectionWrapModeSelect = sectionDivider.querySelector('.section-image-wrap-mode-select');
             
             if (sectionTitleInput) {
-                sectionTitleInput.value = sectionInfo && sectionInfo.title
+                const titleValue = sectionInfo && sectionInfo.title
                     ? sectionInfo.title
                     : `Bagian ${currentSectionIndex + 1}`;
+                if (sectionTitleInput.contentEditable === 'true') {
+                    sectionTitleInput.innerHTML = titleValue;
+                    // Apply formatting if available
+                    const formatting = textFormattingMap[`section_title_${currentSectionIndex}`];
+                    if (formatting) {
+                        applyFormattingToElement(sectionTitleInput, formatting);
+                    }
+                } else {
+                    sectionTitleInput.value = titleValue;
+                }
             }
             
             if (sectionDescInput && sectionInfo && sectionInfo.description) {
-                sectionDescInput.value = sectionInfo.description;
+                if (sectionDescInput.contentEditable === 'true') {
+                    sectionDescInput.innerHTML = sectionInfo.description;
+                    // Apply formatting if available
+                    const formatting = textFormattingMap[`section_description_${currentSectionIndex}`];
+                    if (formatting) {
+                        applyFormattingToElement(sectionDescInput, formatting);
+                    }
+                } else {
+                    sectionDescInput.value = sectionInfo.description;
+                }
             }
             
             // Handle section image
@@ -658,7 +677,28 @@ function renderQuestionsIncrementally({ questions, sections, container, onComple
 
         const titleInput = questionCard.querySelector('.question-title');
         if (titleInput) {
-            titleInput.value = questionData.title || '';
+            // Convert to contenteditable if it's still an input element
+            // Store the HTML content first before conversion
+            const htmlContent = questionData.title || '';
+            let editableTitle = titleInput;
+            
+            if (titleInput.tagName === 'INPUT' || titleInput.tagName === 'TEXTAREA') {
+                // Convert to contenteditable - HTML will be set after conversion
+                editableTitle = convertToContentEditable(titleInput);
+            }
+            
+            // Set HTML content (will render HTML properly, not as text)
+            if (editableTitle.contentEditable === 'true') {
+                editableTitle.innerHTML = htmlContent;
+                // Apply formatting if available
+                // Use questionIndex (not questionData.id) because formatting is mapped by index
+                const formatting = textFormattingMap[`question_title_${questionIndex}`];
+                if (formatting) {
+                    applyFormattingToElement(editableTitle, formatting);
+                }
+            } else {
+                editableTitle.value = htmlContent;
+            }
         }
 
         const requiredCheckbox = questionCard.querySelector('.required-checkbox');
@@ -1894,11 +1934,12 @@ function createQuestionCard(type = 'short-answer') {
             <div class="flex-1 min-w-0">
                 <!-- Question Title Input -->
                 <div class="mb-2">
-                    <input 
-                        type="text" 
-                        placeholder="Pertanyaan" 
-                        class="w-full text-base font-normal text-gray-900 border-none outline-none focus:ring-0 placeholder-gray-400 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors question-title"
-                    >
+                    <div 
+                        contenteditable="true"
+                        data-placeholder="Pertanyaan"
+                        class="w-full text-base font-normal text-gray-900 border-none outline-none focus:ring-0 pb-2 border-b-2 border-transparent focus:border-red-600 transition-colors question-title empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+                        style="min-height: 1.5em;"
+                    ></div>
                 </div>
 
                 <!-- Formatting Toolbar -->
@@ -3682,10 +3723,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const savedRules = loadSavedRules();
             formData.saved_rules = savedRules;
             
-            // Debug: log result_text_settings
+            // Debug: log result_text_settings and text_formatting
             console.log('[FormBuilder] Saving form data:', {
                 result_text_settings_count: formData.result_text_settings?.length || 0,
                 result_text_settings: formData.result_text_settings,
+                text_formatting_count: formData.text_formatting?.length || 0,
+                text_formatting: formData.text_formatting,
             });
             
             fetch(saveFormUrl, {
@@ -3781,9 +3824,17 @@ function attachQuestionCardEvents(card) {
         duplicateBtn.addEventListener('click', function() {
             const type = card.getAttribute('data-question-type');
             const newCard = createQuestionCard(type);
-            const title = card.querySelector('.question-title').value;
+            const titleElement = card.querySelector('.question-title');
+            const title = titleElement ? getHTMLFromContentEditable(titleElement) : '';
             if (title) {
-                newCard.querySelector('.question-title').value = title;
+                const newTitleElement = newCard.querySelector('.question-title');
+                if (newTitleElement) {
+                    if (newTitleElement.contentEditable === 'true') {
+                        newTitleElement.innerHTML = title;
+                    } else {
+                        newTitleElement.value = title;
+                    }
+                }
             }
             card.parentNode.insertBefore(newCard, card.nextSibling);
             updateQuestionNumbers();
@@ -4280,9 +4331,23 @@ function updateSectionNumbers() {
 function collectFormData(options = {}) {
     const { includeRules = true } = options;
 
+    // Get title HTML - backend will strip HTML for validation but save HTML to database
+    const titleHTML = getHTMLFromContentEditable(document.getElementById('form-title')) || 'Formulir tanpa judul';
+    // Check plain text length - if too long, truncate the HTML content
+    const titlePlainText = stripHTMLTags(titleHTML);
+    let finalTitle = titleHTML;
+    if (titlePlainText.length > 255) {
+        // If plain text is too long, truncate HTML by removing characters from the end
+        // This is a simple approach - for better results, we'd need to parse HTML properly
+        const maxPlainLength = 255;
+        let truncatedPlain = titlePlainText.substring(0, maxPlainLength);
+        // Try to preserve some HTML structure by finding a good truncation point
+        finalTitle = truncatedPlain;
+    }
+
     const formData = {
-        title: getPlainTextFromContentEditable(document.getElementById('form-title')) || 'Formulir tanpa judul',
-        description: getPlainTextFromContentEditable(document.getElementById('form-description')) || '',
+        title: finalTitle || 'Formulir tanpa judul',
+        description: getHTMLFromContentEditable(document.getElementById('form-description')) || '',
         theme_color: (() => {
             const selectedThemeButton = document.querySelector('[data-theme-color][data-selected="true"]');
             return selectedThemeButton ? selectedThemeButton.getAttribute('data-theme-color') : 'red';
@@ -4308,8 +4373,8 @@ function collectFormData(options = {}) {
         const wrapModeSelect = section.querySelector('.section-image-wrap-mode-select');
         
         formData.sections.push({
-            title: getPlainTextFromContentEditable(titleInput)?.trim() || null,
-            description: getPlainTextFromContentEditable(descInput)?.trim() || null,
+            title: getHTMLFromContentEditable(titleInput)?.trim() || null,
+            description: getHTMLFromContentEditable(descInput)?.trim() || null,
             image: imageValueInput?.value?.trim() || null,
             image_alignment: alignmentSelect?.value || 'center',
             image_wrap_mode: wrapModeSelect?.value || 'fixed',
@@ -4429,7 +4494,7 @@ function collectFormData(options = {}) {
 
         const questionData = {
             type: questionCard.getAttribute('data-question-type') || 'short-answer',
-            title: getPlainTextFromContentEditable(questionCard.querySelector('.question-title')) || '',
+            title: getHTMLFromContentEditable(questionCard.querySelector('.question-title')) || '',
             description: questionCard.querySelector('.question-description')?.value || '',
             is_required: questionCard.querySelector('.required-checkbox')?.checked || false,
             options: [],
@@ -4571,7 +4636,271 @@ function collectFormData(options = {}) {
         }
     });
 
+    // Collect header data
+    if (headerState && headerState.imageUrl) {
+        formData.header = {
+            image_path: headerState.imageUrl,
+            image_mode: headerState.imageMode || 'cover',
+            source: headerState.source || null,
+        };
+    }
+
+    // Collect text formatting data
+    formData.text_formatting = [];
+
+    // Form title and description formatting
+    const formTitle = document.getElementById('form-title');
+    const formDescription = document.getElementById('form-description');
+    
+    if (formTitle) {
+        // Collect formatting directly from the element itself, not from parent card
+        const formatting = collectElementFormatting(formTitle, 'form_title');
+        if (formatting) {
+            formData.text_formatting.push(formatting);
+        }
+    }
+    
+    if (formDescription) {
+        // Collect formatting directly from the element itself, not from parent card
+        const formatting = collectElementFormatting(formDescription, 'form_description');
+        if (formatting) {
+            formData.text_formatting.push(formatting);
+        }
+    }
+
+    // Question title formatting
+    document.querySelectorAll('.question-card').forEach((questionCard) => {
+        const questionTitle = questionCard.querySelector('.question-title');
+        if (questionTitle) {
+            // Use the index (order) as question_id - backend will map it to database ID
+            const questionIndex = Array.from(document.querySelectorAll('.question-card')).indexOf(questionCard);
+            // Collect formatting directly from the question title element, not from parent card
+            const formatting = collectElementFormatting(questionTitle, 'question_title', questionIndex);
+            if (formatting) {
+                formData.text_formatting.push(formatting);
+            }
+        }
+    });
+
+    // Section title and description formatting
+    document.querySelectorAll('.section-divider').forEach((sectionDivider) => {
+        const sectionTitle = sectionDivider.querySelector('.section-title-input');
+        const sectionDescription = sectionDivider.querySelector('.section-description-input');
+        const sectionIndex = Array.from(document.querySelectorAll('.section-divider')).indexOf(sectionDivider);
+        
+        if (sectionTitle) {
+            const formatting = collectElementFormatting(sectionDivider, 'section_title', null, sectionIndex);
+            if (formatting) {
+                formData.text_formatting.push(formatting);
+            }
+        }
+        
+        if (sectionDescription) {
+            const formatting = collectElementFormatting(sectionDivider, 'section_description', null, sectionIndex);
+            if (formatting) {
+                formData.text_formatting.push(formatting);
+            }
+        }
+    });
+
     return formData;
+}
+
+// Helper function to apply formatting to an element
+function applyFormattingToElement(element, formatting) {
+    if (!element || !formatting) return;
+
+    element.style.textAlign = formatting.text_align || 'left';
+    element.style.fontFamily = formatting.font_family || 'Arial';
+    element.style.fontSize = `${formatting.font_size || 12}px`;
+    element.style.fontWeight = formatting.font_weight || 'normal';
+    element.style.fontStyle = formatting.font_style || 'normal';
+    element.style.textDecoration = formatting.text_decoration || 'none';
+
+    // Store in data attributes for persistence
+    // For form_title and form_description, store directly on element to avoid conflicts
+    // For questions and sections, store on parent card
+    const isFormTitleOrDescription = element.id === 'form-title' || element.id === 'form-description';
+    if (isFormTitleOrDescription) {
+        // Store directly on element for form title/description
+        element.setAttribute('data-textAlign', formatting.text_align || 'left');
+        element.setAttribute('data-fontFamily', formatting.font_family || 'Arial');
+        element.setAttribute('data-fontSize', formatting.font_size || 12);
+        element.setAttribute('data-fontWeight', formatting.font_weight || 'normal');
+        element.setAttribute('data-fontStyle', formatting.font_style || 'normal');
+        element.setAttribute('data-textDecoration', formatting.text_decoration || 'none');
+    } else {
+        // For questions and sections, store on parent card
+        const parentCard = element.closest('.question-card, .section-divider');
+        const target = parentCard || element;
+        target.setAttribute('data-textAlign', formatting.text_align || 'left');
+        target.setAttribute('data-fontFamily', formatting.font_family || 'Arial');
+        target.setAttribute('data-fontSize', formatting.font_size || 12);
+        target.setAttribute('data-fontWeight', formatting.font_weight || 'normal');
+        target.setAttribute('data-fontStyle', formatting.font_style || 'normal');
+        target.setAttribute('data-textDecoration', formatting.text_decoration || 'none');
+    }
+}
+
+// Helper function to extract formatting from HTML content (inline spans)
+function extractFormattingFromHTML(element) {
+    if (!element) return {};
+    
+    // Get all spans with inline styles in the element
+    const spans = element.querySelectorAll('span[style]');
+    const formatting = {
+        font_family: null,
+        font_size: null,
+        font_weight: null,
+        font_style: null,
+        text_decoration: null,
+    };
+    
+    // Check if there are any spans with formatting
+    if (spans.length > 0) {
+        // Get formatting from spans - prioritize spans with more formatting properties
+        // or use the first span that has the property we're looking for
+        spans.forEach(span => {
+            const style = span.style;
+            const styleText = span.getAttribute('style') || '';
+            
+            // Extract font-family
+            if (style.fontFamily || styleText.includes('font-family')) {
+                const fontFamilyValue = style.fontFamily || 
+                    (styleText.match(/font-family:\s*([^;]+)/i) ? styleText.match(/font-family:\s*([^;]+)/i)[1].trim() : null);
+                if (fontFamilyValue && !formatting.font_family) {
+                    formatting.font_family = fontFamilyValue.split(',')[0].replace(/['"]/g, '').trim();
+                }
+            }
+            
+            // Extract font-size
+            if (style.fontSize || styleText.includes('font-size')) {
+                const fontSizeValue = style.fontSize || 
+                    (styleText.match(/font-size:\s*([^;]+)/i) ? styleText.match(/font-size:\s*([^;]+)/i)[1].trim() : null);
+                if (fontSizeValue && !formatting.font_size) {
+                    const parsed = parseInt(fontSizeValue.replace('px', '').replace('pt', '')) || null;
+                    if (parsed) formatting.font_size = parsed;
+                }
+            }
+            
+            // Extract font-weight
+            if (style.fontWeight || styleText.includes('font-weight')) {
+                const fontWeightValue = style.fontWeight || 
+                    (styleText.match(/font-weight:\s*([^;]+)/i) ? styleText.match(/font-weight:\s*([^;]+)/i)[1].trim() : null);
+                if (fontWeightValue && !formatting.font_weight) {
+                    formatting.font_weight = (fontWeightValue === 'bold' || parseInt(fontWeightValue) >= 700) ? 'bold' : 'normal';
+                }
+            }
+            
+            // Extract font-style
+            if (style.fontStyle || styleText.includes('font-style')) {
+                const fontStyleValue = style.fontStyle || 
+                    (styleText.match(/font-style:\s*([^;]+)/i) ? styleText.match(/font-style:\s*([^;]+)/i)[1].trim() : null);
+                if (fontStyleValue && !formatting.font_style) {
+                    formatting.font_style = (fontStyleValue === 'italic') ? 'italic' : 'normal';
+                }
+            }
+            
+            // Extract text-decoration
+            if (style.textDecoration || styleText.includes('text-decoration')) {
+                const textDecorationValue = style.textDecoration || 
+                    (styleText.match(/text-decoration:\s*([^;]+)/i) ? styleText.match(/text-decoration:\s*([^;]+)/i)[1].trim() : null);
+                if (textDecorationValue && !formatting.text_decoration) {
+                    formatting.text_decoration = (textDecorationValue.includes('underline')) ? 'underline' : 'none';
+                }
+            }
+        });
+    }
+    
+    return formatting;
+}
+
+// Helper function to collect formatting from an element
+function collectElementFormatting(element, elementType, questionId = null, sectionIndex = null) {
+    if (!element) return null;
+
+    // For form_title, form_description, and question_title, get formatting directly from element
+    // For sections, get from element or parent card
+    const isFormTitleOrDescription = elementType === 'form_title' || elementType === 'form_description';
+    const isQuestionTitle = elementType === 'question_title';
+    
+    // Determine which element to get formatting from
+    let targetElement = element;
+    if (!isFormTitleOrDescription && !isQuestionTitle) {
+        // For sections, get from parent card if available
+        targetElement = element.closest('.section-divider') || element;
+    }
+
+    // Get formatting from the target element (element itself for form/question, parent for sections)
+    const computedStyle = window.getComputedStyle(element);
+    
+    // Extract formatting from HTML content first (for inline styles in spans)
+    const htmlFormatting = extractFormattingFromHTML(element);
+    
+    // Get formatting from data attributes, inline styles, or computed styles
+    // Priority: HTML inline spans (from toolbar) > data attributes > element style > computed style
+    const textAlign = element.getAttribute('data-textAlign') || element.style.textAlign || computedStyle.textAlign || 'left';
+    
+    // Font family: prioritize HTML spans (from toolbar changes) over data attributes
+    let fontFamily = htmlFormatting.font_family 
+        || element.getAttribute('data-fontFamily') 
+        || element.style.fontFamily 
+        || computedStyle.fontFamily 
+        || 'Arial';
+    // Extract first font family from computed style
+    if (fontFamily) {
+        fontFamily = fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+    }
+    
+    // Font size: check HTML spans first, then data attribute, then element style, then computed
+    let fontSizeValue = htmlFormatting.font_size 
+        ? `${htmlFormatting.font_size}px`
+        : (element.getAttribute('data-fontSize') || element.style.fontSize || computedStyle.fontSize || '12px');
+    // Parse fontSize - remove 'px' if present
+    const fontSize = parseInt(fontSizeValue.toString().replace('px', '')) || 12;
+    
+    // Font weight: check HTML spans first, then data attribute, then element style, then computed
+    const fontWeight = htmlFormatting.font_weight 
+        || element.getAttribute('data-fontWeight') 
+        || element.style.fontWeight 
+        || computedStyle.fontWeight 
+        || 'normal';
+    
+    // Font style: check HTML spans first, then data attribute, then element style, then computed
+    const fontStyle = htmlFormatting.font_style 
+        || element.getAttribute('data-fontStyle') 
+        || element.style.fontStyle 
+        || computedStyle.fontStyle 
+        || 'normal';
+    
+    // Text decoration: check HTML spans first, then data attribute, then element style, then computed
+    const textDecoration = htmlFormatting.text_decoration 
+        || element.getAttribute('data-textDecoration') 
+        || element.style.textDecoration 
+        || computedStyle.textDecoration 
+        || 'none';
+
+    const formatting = {
+        element_type: elementType,
+        text_align: textAlign,
+        font_family: fontFamily,
+        font_size: fontSize,
+        font_weight: fontWeight === 'bold' || fontWeight >= 700 ? 'bold' : 'normal',
+        font_style: fontStyle === 'italic' ? 'italic' : 'normal',
+        text_decoration: textDecoration === 'underline' ? 'underline' : 'none',
+    };
+
+    // Add appropriate ID based on element type
+    if (elementType === 'question_title' && questionId !== null && questionId !== undefined) {
+        // We'll need to map question_id later when saving
+        // Note: questionId can be 0 (first question), so we check for null/undefined, not truthy
+        formatting.question_id = questionId;
+    } else if ((elementType === 'section_title' || elementType === 'section_description') && sectionIndex !== null) {
+        // We'll need to map section_id later when saving
+        formatting.section_index = sectionIndex;
+    }
+
+    return formatting;
 }
 
 // Fungsi untuk menampilkan dialog sukses
@@ -4811,10 +5140,36 @@ function populateFormBuilder(data) {
         questionsContainer.innerHTML = '';
     }
 
+    // Load header data
+    if (data.header && typeof headerState !== 'undefined') {
+        headerState.imageUrl = data.header.image_path || null;
+        headerState.imageMode = data.header.image_mode || 'cover';
+        headerState.source = data.header.source || null;
+        
+        // Apply header to form if exists
+        if (headerState.imageUrl && typeof applyHeaderToForm === 'function') {
+            setTimeout(() => applyHeaderToForm(), 100);
+        }
+    }
+
+    // Load text formatting data
+    const textFormattingMap = {};
+    if (data.text_formatting && Array.isArray(data.text_formatting)) {
+        data.text_formatting.forEach(formatting => {
+            const key = `${formatting.element_type}_${formatting.question_id || formatting.section_index || ''}`;
+            textFormattingMap[key] = formatting;
+        });
+    }
+
     const titleInput = document.getElementById('form-title');
     if (titleInput) {
         if (titleInput.contentEditable === 'true') {
-            titleInput.textContent = data.title || '';
+            titleInput.innerHTML = data.title || '';
+            // Apply formatting
+            const formatting = textFormattingMap['form_title_'];
+            if (formatting) {
+                applyFormattingToElement(titleInput, formatting);
+            }
             if (!data.title) {
                 titleInput.classList.add('empty');
             } else {
@@ -4828,7 +5183,12 @@ function populateFormBuilder(data) {
     const descriptionInput = document.getElementById('form-description');
     if (descriptionInput) {
         if (descriptionInput.contentEditable === 'true') {
-            descriptionInput.textContent = data.description || '';
+            descriptionInput.innerHTML = data.description || '';
+            // Apply formatting
+            const formatting = textFormattingMap['form_description_'];
+            if (formatting) {
+                applyFormattingToElement(descriptionInput, formatting);
+            }
             if (!data.description) {
                 descriptionInput.classList.add('empty');
             } else {
@@ -5001,6 +5361,7 @@ function populateFormBuilder(data) {
         sections,
         container: questionsContainer,
         batchSize,
+        textFormattingMap: textFormattingMap, // Pass formatting map
         onComplete: () => {
             updateMainButtonsVisibility();
             if (questions.length === 0) {
@@ -5721,6 +6082,130 @@ function getPlainTextFromContentEditable(element) {
     return element.value || '';
 }
 
+// Normalize HTML by removing unnecessary nested spans
+function normalizeHTML(html) {
+    if (!html) return '';
+    
+    // Create a temporary container to parse HTML
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    
+    // Flatten nested spans
+    const flattenSpans = (container) => {
+        const spans = container.querySelectorAll('span');
+        spans.forEach(span => {
+            // If span is nested inside another span
+            if (span.parentElement && span.parentElement.tagName === 'SPAN') {
+                const parentSpan = span.parentElement;
+                const parentStyle = parentSpan.getAttribute('style') || '';
+                const spanStyle = span.getAttribute('style') || '';
+                
+                // If same style, remove inner span
+                if (parentStyle === spanStyle) {
+                    while (span.firstChild) {
+                        parentSpan.insertBefore(span.firstChild, span);
+                    }
+                    parentSpan.removeChild(span);
+                }
+                // If different styles, merge into inner span and move out
+                else if (spanStyle && parentStyle) {
+                    // Merge styles (inner takes precedence)
+                    const mergedStyle = mergeStyles(parentStyle, spanStyle);
+                    span.setAttribute('style', mergedStyle);
+                    
+                    // Move span out of parent
+                    parentSpan.parentNode.insertBefore(span, parentSpan);
+                    
+                    // Move parent's other children after span
+                    while (parentSpan.firstChild) {
+                        span.parentNode.insertBefore(parentSpan.firstChild, span.nextSibling);
+                    }
+                    
+                    // Remove empty parent
+                    parentSpan.parentNode.removeChild(parentSpan);
+                }
+                // If parent has no style, just remove parent
+                else if (!parentStyle && spanStyle) {
+                    parentSpan.parentNode.insertBefore(span, parentSpan);
+                    while (parentSpan.firstChild) {
+                        span.parentNode.insertBefore(parentSpan.firstChild, span.nextSibling);
+                    }
+                    parentSpan.parentNode.removeChild(parentSpan);
+                }
+            }
+        });
+    };
+    
+    // Run multiple times to handle deeply nested spans
+    for (let i = 0; i < 5; i++) {
+        flattenSpans(temp);
+    }
+    
+    // Remove empty spans
+    const emptySpans = temp.querySelectorAll('span');
+    emptySpans.forEach(span => {
+        const style = span.getAttribute('style') || '';
+        const text = span.textContent.trim();
+        if (!style && !text) {
+            while (span.firstChild) {
+                span.parentNode.insertBefore(span.firstChild, span);
+            }
+            span.parentNode.removeChild(span);
+        }
+    });
+    
+    return temp.innerHTML;
+}
+
+// Merge two CSS style strings (inner style takes precedence)
+function mergeStyles(parentStyle, innerStyle) {
+    const parseStyle = (styleStr) => {
+        const styles = {};
+        styleStr.split(';').forEach(rule => {
+            const trimmed = rule.trim();
+            if (trimmed) {
+                const [prop, value] = trimmed.split(':').map(s => s.trim());
+                if (prop && value) {
+                    styles[prop] = value;
+                }
+            }
+        });
+        return styles;
+    };
+    
+    const parentStyles = parseStyle(parentStyle);
+    const innerStyles = parseStyle(innerStyle);
+    
+    // Merge: inner takes precedence
+    const merged = { ...parentStyles, ...innerStyles };
+    
+    // Convert back to style string
+    return Object.entries(merged)
+        .map(([prop, value]) => `${prop}: ${value}`)
+        .join('; ');
+}
+
+// Get HTML content from contenteditable (preserves formatting like bold, italic, underline)
+function getHTMLFromContentEditable(element) {
+    if (!element) return '';
+    if (element.contentEditable === 'true') {
+        const html = element.innerHTML || '';
+        // Normalize HTML to remove nested spans before sending to backend
+        return normalizeHTML(html);
+    }
+    // For regular input/textarea, return as plain text wrapped in a span or just return value
+    const value = element.value || '';
+    return value ? `<span>${value.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>` : '';
+}
+
+// Strip HTML tags from string
+function stripHTMLTags(html) {
+    if (!html) return '';
+    const tmp = document.createElement('DIV');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+}
+
 // Apply formatting to active card (FE ONLY - no database connection)
 function applyCardFormatting(property, value) {
     // Use stored activeInputElement instead of document.activeElement
@@ -5752,12 +6237,22 @@ function applyCardFormatting(property, value) {
     }
 
     // Store formatting in data attribute for FE persistence (NOT saved to database)
-    // Store on the input element itself or its parent card
-    const parentCard = activeInput.closest('.question-card, .section-divider, .bg-white.rounded-lg');
-    if (parentCard) {
-        parentCard.setAttribute(`data-${property}`, value);
-    } else {
+    // Store on the input element itself to avoid conflicts
+    const isFormTitleOrDescription = activeInput.id === 'form-title' || activeInput.id === 'form-description';
+    const isQuestionTitle = activeInput.classList.contains('question-title');
+    const isSectionTitleOrDesc = activeInput.classList.contains('section-title-input') || activeInput.classList.contains('section-description-input');
+    
+    if (isFormTitleOrDescription || isQuestionTitle || isSectionTitleOrDesc) {
+        // Store directly on element for form/question/section title/description to avoid conflicts
         activeInput.setAttribute(`data-${property}`, value);
+    } else {
+        // For other elements, store on parent card
+        const parentCard = activeInput.closest('.question-card, .section-divider');
+        if (parentCard) {
+            parentCard.setAttribute(`data-${property}`, value);
+        } else {
+            activeInput.setAttribute(`data-${property}`, value);
+        }
     }
 }
 
@@ -5786,28 +6281,48 @@ function applyFormattingToSelection(property, value, range) {
                 document.execCommand('underline', false, null);
                 break;
             case 'fontSize':
-                // Wrap selection in span with font size
-                const fontSizeSpan = document.createElement('span');
-                fontSizeSpan.style.fontSize = `${value}px`;
-                try {
-                    range.surroundContents(fontSizeSpan);
-                } catch (e) {
-                    // If surroundContents fails, use extractContents
-                    const contents = range.extractContents();
-                    fontSizeSpan.appendChild(contents);
-                    range.insertNode(fontSizeSpan);
+                // Check if selection is already in a span, if so, update its style instead of wrapping
+                let fontSizeContainer = range.commonAncestorContainer;
+                if (fontSizeContainer.nodeType === Node.TEXT_NODE) {
+                    fontSizeContainer = fontSizeContainer.parentElement;
+                }
+                // If already in a span, update its fontSize style
+                if (fontSizeContainer && fontSizeContainer.tagName === 'SPAN' && fontSizeContainer.style.fontSize) {
+                    fontSizeContainer.style.fontSize = `${value}px`;
+                } else {
+                    // Wrap selection in span with font size
+                    const fontSizeSpan = document.createElement('span');
+                    fontSizeSpan.style.fontSize = `${value}px`;
+                    try {
+                        range.surroundContents(fontSizeSpan);
+                    } catch (e) {
+                        // If surroundContents fails, use extractContents
+                        const contents = range.extractContents();
+                        fontSizeSpan.appendChild(contents);
+                        range.insertNode(fontSizeSpan);
+                    }
                 }
                 break;
             case 'fontFamily':
-                // Wrap selection in span with font family
-                const fontFamilySpan = document.createElement('span');
-                fontFamilySpan.style.fontFamily = value;
-                try {
-                    range.surroundContents(fontFamilySpan);
-                } catch (e) {
-                    const contents = range.extractContents();
-                    fontFamilySpan.appendChild(contents);
-                    range.insertNode(fontFamilySpan);
+                // Check if selection is already in a span, if so, update its style instead of wrapping
+                let fontFamilyContainer = range.commonAncestorContainer;
+                if (fontFamilyContainer.nodeType === Node.TEXT_NODE) {
+                    fontFamilyContainer = fontFamilyContainer.parentElement;
+                }
+                // If already in a span, update its fontFamily style
+                if (fontFamilyContainer && fontFamilyContainer.tagName === 'SPAN' && fontFamilyContainer.style.fontFamily) {
+                    fontFamilyContainer.style.fontFamily = value;
+                } else {
+                    // Wrap selection in span with font family
+                    const fontFamilySpan = document.createElement('span');
+                    fontFamilySpan.style.fontFamily = value;
+                    try {
+                        range.surroundContents(fontFamilySpan);
+                    } catch (e) {
+                        const contents = range.extractContents();
+                        fontFamilySpan.appendChild(contents);
+                        range.insertNode(fontFamilySpan);
+                    }
                 }
                 break;
             case 'textAlign':

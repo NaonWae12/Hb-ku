@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ $form->title }} - hb-ku Form</title>
+    <title>{{ strip_tags($form->title) }} - hb-ku Form</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
         .form-page {
@@ -28,9 +28,9 @@
 
         <div class="bg-white rounded-2xl shadow-lg border border-gray-100 mb-6">
             <div class="p-8">
-                <h1 class="text-2xl font-semibold text-gray-900 mb-2">{{ $form->title }}</h1>
+                <h1 class="text-2xl font-semibold text-gray-900 mb-2">{{ strip_tags($form->title) }}</h1>
                 @if($form->description)
-                    <p class="text-sm text-gray-600">{{ $form->description }}</p>
+                    <p class="text-sm text-gray-600">{{ strip_tags($form->description) }}</p>
                 @endif
                 <div class="mt-4 text-xs text-gray-500">
                     Bagikan tautan ini: <span class="font-medium text-gray-700">{{ $shareUrl }}</span>

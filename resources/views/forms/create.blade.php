@@ -11,13 +11,13 @@ $responsesStats = $responsesStats ?? [
 ];
 @endphp
 <div class="min-h-screen bg-rose-50" id="form-builder-root"
-    data-initial='@json($formData ? array_merge($formData, ['rule_groups' => $formData['rule_groups'] ?? []]) : ['rule_groups' => []])'
+    data-initial="{!! e(json_encode($formData ? array_merge($formData, ['rule_groups' => $formData['rule_groups'] ?? []]) : ['rule_groups' => []])) !!}"
     data-mode="{{ $formMode ?? 'create' }}"
     data-form-id="{{ $formId }}"
     data-share-url="{{ $shareUrl ?? '' }}"
     data-responses-url="{{ $formId ? route('forms.responses.data', $formId) : '' }}"
     data-total-responses="{{ $responsesStats['total_responses'] }}"
-    data-saved-rules='@json($savedRules ?? [])'>
+    data-saved-rules="{!! e(json_encode($savedRules ?? [])) !!}">
     <!-- Top Bar dengan tombol -->
     <div class="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

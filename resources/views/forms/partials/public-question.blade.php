@@ -19,13 +19,13 @@
     <div class="flex items-start justify-between mb-3">
         <div>
             <h3 class="text-base font-medium text-gray-900">
-                {{ $question->title ?? 'Pertanyaan' }}
+                {!! $question->title ?? 'Pertanyaan' !!}
                 @if($question->is_required)
                     <span class="text-red-600">*</span>
                 @endif
             </h3>
             @if($question->description)
-                <p class="text-sm text-gray-500 mt-1">{{ $question->description }}</p>
+                <p class="text-sm text-gray-500 mt-1">{!! $question->description !!}</p>
             @endif
         </div>
     </div>

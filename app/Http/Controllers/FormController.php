@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Form;
+use App\Models\FormHeader;
 use App\Models\FormResponse;
+use App\Models\FormTextFormatting;
 use App\Models\SettingResult;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -84,8 +86,13 @@ class FormController extends Controller
      */
     public function store(Request $request)
     {
+        // Strip HTML from title for validation (check plain text length)
+        $titlePlainText = strip_tags($request->title);
+        $request->merge(['title_plain' => $titlePlainText]);
+
         $request->validate([
-            'title' => 'required|string|max:255',
+            'title' => 'required|string',
+            'title_plain' => 'required|string|max:255',
             'description' => 'nullable|string',
             'theme_color' => 'nullable|string|in:red,blue,green,purple',
             'collect_email' => 'boolean',
@@ -97,11 +104,16 @@ class FormController extends Controller
         try {
             DB::beginTransaction();
 
+            // Use HTML title for slug generation (strip HTML for slug)
+            $slugTitle = strip_tags($request->title);
+            // Clean and optimize HTML before storing
+            $cleanedTitle = $this->cleanHTML($request->title);
+            $cleanedDescription = $request->description ? $this->cleanHTML($request->description) : null;
             $form = Form::create([
                 'user_id' => Auth::id(),
-                'title' => $request->title,
-                'description' => $request->description,
-                'slug' => Str::slug($request->title) . '-' . time(),
+                'title' => $cleanedTitle, // Store cleaned HTML in database
+                'description' => $cleanedDescription,
+                'slug' => Str::slug($slugTitle) . '-' . time(),
                 'theme_color' => $request->theme_color ?? 'red',
                 'collect_email' => $request->boolean('collect_email'),
                 'limit_one_response' => $request->boolean('limit_one_response'),
@@ -117,6 +129,23 @@ class FormController extends Controller
                 'questions' => $request->input('questions', []),
                 'result_text_settings' => $request->input('result_text_settings', []),
             ]);
+
+            // Sync header and text formatting
+            $this->syncFormHeader($form, $request->input('header', []));
+
+            // Build question and section ID maps for formatting sync
+            // Map by order (index) to database ID
+            $questionIdMap = [];
+            $form->questions()->orderBy('order')->get()->each(function ($question, $index) use (&$questionIdMap) {
+                $questionIdMap[$index] = $question->id;
+            });
+
+            $sectionIdMap = [];
+            $form->sections()->orderBy('order')->get()->each(function ($section, $index) use (&$sectionIdMap) {
+                $sectionIdMap[$index] = $section->id;
+            });
+
+            $this->syncTextFormatting($form, $request->input('text_formatting', []), $questionIdMap, $sectionIdMap);
 
             DB::commit();
 
@@ -195,8 +224,13 @@ class FormController extends Controller
             abort(403);
         }
 
+        // Strip HTML from title for validation (check plain text length)
+        $titlePlainText = strip_tags($request->title);
+        $request->merge(['title_plain' => $titlePlainText]);
+
         $request->validate([
-            'title' => 'required|string|max:255',
+            'title' => 'required|string',
+            'title_plain' => 'required|string|max:255',
             'description' => 'nullable|string',
             'theme_color' => 'nullable|string|in:red,blue,green,purple',
             'collect_email' => 'boolean',
@@ -258,9 +292,12 @@ class FormController extends Controller
                 ],
             ]);
 
+            // Clean and optimize HTML before storing
+            $cleanedTitle = $this->cleanHTML($request->title);
+            $cleanedDescription = $request->description ? $this->cleanHTML($request->description) : null;
             $form->update([
-                'title' => $request->title,
-                'description' => $request->description,
+                'title' => $cleanedTitle,
+                'description' => $cleanedDescription,
                 'theme_color' => $request->theme_color ?? 'red',
                 'collect_email' => $request->boolean('collect_email'),
                 'limit_one_response' => $request->boolean('limit_one_response'),
@@ -317,6 +354,23 @@ class FormController extends Controller
                 'questions' => $questionsInput,
                 'result_text_settings' => $resultTextSettingsInput,
             ]);
+
+            // Sync header and text formatting
+            $this->syncFormHeader($form, $request->input('header', []));
+
+            // Build question and section ID maps for formatting sync
+            // Map by order (index) to database ID
+            $questionIdMap = [];
+            $form->questions()->orderBy('order')->get()->each(function ($question, $index) use (&$questionIdMap) {
+                $questionIdMap[$index] = $question->id;
+            });
+
+            $sectionIdMap = [];
+            $form->sections()->orderBy('order')->get()->each(function ($section, $index) use (&$sectionIdMap) {
+                $sectionIdMap[$index] = $section->id;
+            });
+
+            $this->syncTextFormatting($form, $request->input('text_formatting', []), $questionIdMap, $sectionIdMap);
 
             // Log final state after sync
             $finalRuleGroupsCount = $form->ruleGroups()->count();
@@ -829,9 +883,13 @@ class FormController extends Controller
                 continue;
             }
 
+            // Clean HTML for section title and description
+            $cleanedSectionTitle = $sectionData['title'] ? $this->cleanHTML($sectionData['title']) : null;
+            $cleanedSectionDescription = $sectionData['description'] ? $this->cleanHTML($sectionData['description']) : null;
+
             $section = $form->sections()->create([
-                'title' => $sectionData['title'] ?? null,
-                'description' => $sectionData['description'] ?? null,
+                'title' => $cleanedSectionTitle,
+                'description' => $cleanedSectionDescription,
                 'image' => $this->processQuestionImage($sectionData['image'] ?? null, $form),
                 'image_alignment' => $sectionData['image_alignment'] ?? 'center',
                 'image_wrap_mode' => $sectionData['image_wrap_mode'] ?? 'fixed',
@@ -892,10 +950,28 @@ class FormController extends Controller
                 $sectionId = $sectionIdMap[$questionData['section_id']];
             }
 
+            // Clean HTML for question title - remove nested spans and empty tags
+            Log::info('syncFormRelations() - Cleaning question title HTML', [
+                'form_id' => $form->id,
+                'question_index' => $index,
+                'original_title' => $title,
+                'original_title_length' => strlen($title),
+            ]);
+            $cleanedTitle = $this->cleanHTML($title);
+            Log::info('syncFormRelations() - Cleaned question title HTML', [
+                'form_id' => $form->id,
+                'question_index' => $index,
+                'cleaned_title' => $cleanedTitle,
+                'cleaned_title_length' => strlen($cleanedTitle),
+            ]);
+            // If cleaned title is empty after cleaning, use plain text as fallback
+            if (empty(strip_tags($cleanedTitle))) {
+                $cleanedTitle = strip_tags($title);
+            }
             $question = $form->questions()->create([
                 'section_id' => $sectionId,
                 'type' => $questionData['type'] ?? 'short-answer',
-                'title' => $title !== '' ? $title : 'Pertanyaan tanpa judul',
+                'title' => $cleanedTitle !== '' ? $cleanedTitle : 'Pertanyaan tanpa judul',
                 'description' => $questionData['description'] ?? null,
                 'image' => $this->processQuestionImage($questionData['image'] ?? null, $form),
                 'image_alignment' => $questionData['image_alignment'] ?? 'center',
@@ -982,10 +1058,242 @@ class FormController extends Controller
     }
 
     /**
+     * Clean and optimize HTML by removing unnecessary nested spans and empty tags
+     */
+    private function cleanHTML($html): string
+    {
+        if (empty($html)) {
+            return '';
+        }
+
+        try {
+            // Use DOMDocument to parse and clean HTML
+            $dom = new \DOMDocument();
+            libxml_use_internal_errors(true);
+
+            // Wrap in a container div to handle fragments
+            $wrappedHtml = '<div>' . $html . '</div>';
+            $dom->loadHTML('<?xml encoding="UTF-8">' . $wrappedHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+            libxml_clear_errors();
+
+            // Remove empty tags recursively
+            $this->removeEmptyNodes($dom);
+
+            // Flatten nested spans with same style attributes (run multiple times to handle deeply nested)
+            for ($i = 0; $i < 5; $i++) {
+                $this->flattenNestedSpans($dom);
+            }
+
+            // Get cleaned HTML from the wrapper div
+            $wrapper = $dom->getElementsByTagName('div')->item(0);
+            if ($wrapper) {
+                $cleaned = '';
+                foreach ($wrapper->childNodes as $child) {
+                    $cleaned .= $dom->saveHTML($child);
+                }
+                $result = trim($cleaned);
+                Log::info('cleanHTML() - Result', [
+                    'original' => $html,
+                    'cleaned' => $result,
+                    'original_length' => strlen($html),
+                    'cleaned_length' => strlen($result),
+                ]);
+                return $result;
+            }
+        } catch (\Exception $e) {
+            // If parsing fails, return original HTML (it will be stored as-is)
+            Log::warning('Failed to clean HTML', ['error' => $e->getMessage()]);
+        }
+
+        return $html;
+    }
+
+    /**
+     * Flatten nested spans - remove unnecessary nesting
+     */
+    private function flattenNestedSpans(\DOMDocument $dom): void
+    {
+        $xpath = new \DOMXPath($dom);
+        $spans = $xpath->query('//span');
+
+        // Process in reverse order to avoid issues when removing nodes
+        for ($i = $spans->length - 1; $i >= 0; $i--) {
+            $span = $spans->item($i);
+            if (!$span || !($span instanceof \DOMElement) || !$span->parentNode) {
+                continue;
+            }
+
+            $style = $span->getAttribute('style');
+            $textContent = trim($span->textContent);
+
+            // Remove empty spans
+            if (empty($style) && empty($textContent)) {
+                while ($span->firstChild) {
+                    $span->parentNode->insertBefore($span->firstChild, $span);
+                }
+                $span->parentNode->removeChild($span);
+                continue;
+            }
+
+            // Handle nested spans
+            if ($span->parentNode instanceof \DOMElement && $span->parentNode->nodeName === 'span') {
+                $parentSpan = $span->parentNode;
+                $parentStyle = $parentSpan->getAttribute('style');
+
+                // If same style, remove inner span
+                if ($parentStyle === $style) {
+                    while ($span->firstChild) {
+                        $parentSpan->insertBefore($span->firstChild, $span);
+                    }
+                    $parentSpan->removeChild($span);
+                }
+                // If different styles, merge styles into inner span and remove parent
+                elseif (!empty($style) && !empty($parentStyle)) {
+                    // Merge parent style into inner span (inner style takes precedence)
+                    $mergedStyle = $this->mergeStyles($parentStyle, $style);
+                    $span->setAttribute('style', $mergedStyle);
+
+                    // Move span out of parent
+                    $parentSpan->parentNode->insertBefore($span, $parentSpan);
+
+                    // Move parent's other children after span
+                    while ($parentSpan->firstChild) {
+                        $span->parentNode->insertBefore($parentSpan->firstChild, $span->nextSibling);
+                    }
+
+                    // Remove empty parent
+                    $parentSpan->parentNode->removeChild($parentSpan);
+                }
+                // If parent has no style, just remove parent
+                elseif (empty($parentStyle)) {
+                    while ($span->firstChild) {
+                        $parentSpan->insertBefore($span->firstChild, $span);
+                    }
+                    $parentSpan->parentNode->insertBefore($span, $parentSpan);
+                    while ($parentSpan->firstChild) {
+                        $span->parentNode->insertBefore($parentSpan->firstChild, $span->nextSibling);
+                    }
+                    $parentSpan->parentNode->removeChild($parentSpan);
+                }
+                // If inner span has no style but parent has, remove inner span
+                elseif (empty($style) && !empty($parentStyle)) {
+                    while ($span->firstChild) {
+                        $parentSpan->insertBefore($span->firstChild, $span);
+                    }
+                    $parentSpan->removeChild($span);
+                }
+            }
+        }
+    }
+
+    /**
+     * Merge two CSS style strings, with inner style taking precedence
+     */
+    private function mergeStyles(string $parentStyle, string $innerStyle): string
+    {
+        // Parse both styles into arrays
+        $parentStyles = [];
+        foreach (explode(';', $parentStyle) as $rule) {
+            $rule = trim($rule);
+            if (empty($rule)) continue;
+            $parts = explode(':', $rule, 2);
+            if (count($parts) === 2) {
+                $parentStyles[trim($parts[0])] = trim($parts[1]);
+            }
+        }
+
+        $innerStyles = [];
+        foreach (explode(';', $innerStyle) as $rule) {
+            $rule = trim($rule);
+            if (empty($rule)) continue;
+            $parts = explode(':', $rule, 2);
+            if (count($parts) === 2) {
+                $innerStyles[trim($parts[0])] = trim($parts[1]);
+            }
+        }
+
+        // Merge: inner style takes precedence
+        $merged = array_merge($parentStyles, $innerStyles);
+
+        // Convert back to style string
+        $styleParts = [];
+        foreach ($merged as $property => $value) {
+            $styleParts[] = $property . ': ' . $value;
+        }
+
+        return implode('; ', $styleParts);
+    }
+
+    /**
+     * Recursively remove empty nodes from DOM
+     */
+    private function removeEmptyNodes(\DOMNode $node): void
+    {
+        $children = [];
+        foreach ($node->childNodes as $child) {
+            $children[] = $child;
+        }
+
+        foreach ($children as $child) {
+            if ($child instanceof \DOMElement) {
+                $this->removeEmptyNodes($child);
+
+                // Remove if empty (no text content and no children)
+                $textContent = trim($child->textContent);
+                if (empty($textContent) && $child->childNodes->length === 0) {
+                    $child->parentNode->removeChild($child);
+                }
+            }
+        }
+    }
+
+    /**
      * Menyusun data awal untuk form builder ketika mode edit.
      */
     private function prepareFormBuilderData(Form $form): array
     {
+        // Load header data
+        $form->load('header');
+        $headerData = null;
+        if ($form->header) {
+            $headerData = [
+                'image_path' => $form->header->image_path,
+                'image_mode' => $form->header->image_mode,
+                'source' => $form->header->source,
+            ];
+        }
+
+        // Load text formatting data
+        $form->load(['textFormattings', 'questions.textFormatting', 'sections.textFormattings']);
+        $textFormattingData = [];
+
+        // Form title and description formatting
+        foreach ($form->textFormattings as $formatting) {
+            if (in_array($formatting->element_type, ['form_title', 'form_description'])) {
+                $textFormattingData[] = [
+                    'element_type' => $formatting->element_type,
+                    'text_align' => $formatting->text_align,
+                    'font_family' => $formatting->font_family,
+                    'font_size' => $formatting->font_size,
+                    'font_weight' => $formatting->font_weight,
+                    'font_style' => $formatting->font_style,
+                    'text_decoration' => $formatting->text_decoration,
+                ];
+            } elseif (in_array($formatting->element_type, ['result_setting_title', 'result_setting_text'])) {
+                // Result setup card formatting
+                $textFormattingData[] = [
+                    'element_type' => $formatting->element_type,
+                    'result_rule_text_id' => $formatting->result_rule_text_id,
+                    'text_align' => $formatting->text_align,
+                    'font_family' => $formatting->font_family,
+                    'font_size' => $formatting->font_size,
+                    'font_weight' => $formatting->font_weight,
+                    'font_style' => $formatting->font_style,
+                    'text_decoration' => $formatting->text_decoration,
+                ];
+            }
+        }
+
         $sections = $form->sections->sortBy('order')->values();
         $sectionIndexMap = [];
 
@@ -1022,7 +1330,21 @@ class FormController extends Controller
         $questionsData = $form->questions
             ->sortBy('order')
             ->values()
-            ->map(function ($question) use ($sectionIndexMap, $answerTemplateIndexMap) {
+            ->map(function ($question) use ($sectionIndexMap, $answerTemplateIndexMap, &$textFormattingData) {
+                // Add question formatting
+                if ($question->textFormatting) {
+                    $textFormattingData[] = [
+                        'element_type' => 'question_title',
+                        'question_id' => $question->id,
+                        'text_align' => $question->textFormatting->text_align,
+                        'font_family' => $question->textFormatting->font_family,
+                        'font_size' => $question->textFormatting->font_size,
+                        'font_weight' => $question->textFormatting->font_weight,
+                        'font_style' => $question->textFormatting->font_style,
+                        'text_decoration' => $question->textFormatting->text_decoration,
+                    ];
+                }
+
                 $questionData = [
                     'type' => $question->type,
                     'title' => $question->title,
@@ -1184,6 +1506,8 @@ class FormController extends Controller
             'show_progress_bar' => (bool) $form->show_progress_bar,
             'shuffle_questions' => (bool) $form->shuffle_questions,
             'share_url' => route('forms.public.show', $form),
+            'header' => $headerData,
+            'text_formatting' => $textFormattingData,
             'sections' => $sectionsData,
             'questions' => $questionsData,
             'answer_templates' => $answerTemplatesData,
@@ -1758,5 +2082,246 @@ class FormController extends Controller
         }
 
         return !is_null($value) && $value !== '';
+    }
+
+    /**
+     * Sync form header data
+     */
+    private function syncFormHeader(Form $form, array $headerData): void
+    {
+        if (empty($headerData) || !isset($headerData['image_path'])) {
+            // If no header data, delete existing header
+            $form->header()?->delete();
+            return;
+        }
+
+        $form->header()->updateOrCreate(
+            ['form_id' => $form->id],
+            [
+                'image_path' => $headerData['image_path'] ?? null,
+                'image_mode' => $headerData['image_mode'] ?? 'cover',
+                'source' => $headerData['source'] ?? null,
+            ]
+        );
+    }
+
+    /**
+     * Sync text formatting data
+     */
+    private function syncTextFormatting(Form $form, array $formattingData, array $questionIdMap = [], array $sectionIdMap = []): void
+    {
+        if (empty($formattingData)) {
+            Log::info('syncTextFormatting() - No formatting data to sync', ['form_id' => $form->id]);
+            return;
+        }
+
+        Log::info('syncTextFormatting() - Start', [
+            'form_id' => $form->id,
+            'formatting_count' => count($formattingData),
+            'question_id_map' => $questionIdMap,
+            'question_id_map_keys' => array_keys($questionIdMap),
+            'question_id_map_values' => array_values($questionIdMap),
+            'section_id_map' => $sectionIdMap,
+            'formatting_data' => $formattingData,
+        ]);
+
+        // Delete old formatting entries for questions that no longer exist
+        // Get all current question IDs
+        $currentQuestionIds = array_values($questionIdMap);
+        if (!empty($currentQuestionIds)) {
+            // Delete formatting for questions that don't exist in current form
+            $deletedCount = FormTextFormatting::where('form_id', $form->id)
+                ->where('element_type', 'question_title')
+                ->whereNotIn('question_id', $currentQuestionIds)
+                ->delete();
+            if ($deletedCount > 0) {
+                Log::info('syncTextFormatting() - Deleted old question formatting entries', [
+                    'form_id' => $form->id,
+                    'deleted_count' => $deletedCount,
+                ]);
+            }
+        } else {
+            // If no questions, delete all question formatting for this form
+            $deletedCount = FormTextFormatting::where('form_id', $form->id)
+                ->where('element_type', 'question_title')
+                ->delete();
+            if ($deletedCount > 0) {
+                Log::info('syncTextFormatting() - Deleted all question formatting entries (no questions)', [
+                    'form_id' => $form->id,
+                    'deleted_count' => $deletedCount,
+                ]);
+            }
+        }
+
+        // Delete old formatting entries for sections that no longer exist
+        $currentSectionIds = array_values($sectionIdMap);
+        if (!empty($currentSectionIds)) {
+            $deletedSectionCount = FormTextFormatting::where('form_id', $form->id)
+                ->whereIn('element_type', ['section_title', 'section_description'])
+                ->whereNotIn('section_id', $currentSectionIds)
+                ->delete();
+            if ($deletedSectionCount > 0) {
+                Log::info('syncTextFormatting() - Deleted old section formatting entries', [
+                    'form_id' => $form->id,
+                    'deleted_count' => $deletedSectionCount,
+                ]);
+            }
+        } else {
+            $deletedSectionCount = FormTextFormatting::where('form_id', $form->id)
+                ->whereIn('element_type', ['section_title', 'section_description'])
+                ->delete();
+            if ($deletedSectionCount > 0) {
+                Log::info('syncTextFormatting() - Deleted all section formatting entries (no sections)', [
+                    'form_id' => $form->id,
+                    'deleted_count' => $deletedSectionCount,
+                ]);
+            }
+        }
+
+        foreach ($formattingData as $formatting) {
+            $elementType = $formatting['element_type'] ?? null;
+            if (!$elementType) {
+                Log::warning('syncTextFormatting() - Skipping formatting without element_type', ['formatting' => $formatting]);
+                continue;
+            }
+
+            $data = [
+                'element_type' => $elementType,
+                'text_align' => $formatting['text_align'] ?? 'left',
+                'font_family' => $formatting['font_family'] ?? 'Arial',
+                'font_size' => (int) ($formatting['font_size'] ?? 12),
+                'font_weight' => $formatting['font_weight'] ?? 'normal',
+                'font_style' => $formatting['font_style'] ?? 'normal',
+                'text_decoration' => $formatting['text_decoration'] ?? 'none',
+            ];
+
+            // Determine which foreign key to use based on element_type
+            if (in_array($elementType, ['form_title', 'form_description'])) {
+                FormTextFormatting::updateOrCreate(
+                    [
+                        'form_id' => $form->id,
+                        'element_type' => $elementType,
+                    ],
+                    array_merge($data, ['form_id' => $form->id])
+                );
+            } elseif ($elementType === 'question_title') {
+                // Map question_id from frontend index to database ID
+                $questionIndex = $formatting['question_id'] ?? null;
+                $questionId = null;
+
+                Log::info('syncTextFormatting() - Processing question_title', [
+                    'form_id' => $form->id,
+                    'question_index' => $questionIndex,
+                    'question_id_map' => $questionIdMap,
+                ]);
+
+                if ($questionIndex !== null) {
+                    // First, try to map from questionIdMap (index-based mapping)
+                    if (isset($questionIdMap[$questionIndex])) {
+                        $questionId = $questionIdMap[$questionIndex];
+                        Log::info('syncTextFormatting() - Mapped question_id from questionIdMap', [
+                            'form_id' => $form->id,
+                            'question_index' => $questionIndex,
+                            'question_id' => $questionId,
+                        ]);
+                    } elseif (is_numeric($questionIndex)) {
+                        // If it's numeric, check if it exists in database
+                        $questionId = (int) $questionIndex;
+                        $questionExists = $form->questions()->where('id', $questionId)->exists();
+                        if (!$questionExists) {
+                            // If question doesn't exist, try to find by order
+                            $question = $form->questions()->where('order', $questionIndex)->first();
+                            $questionId = $question ? $question->id : null;
+                            Log::info('syncTextFormatting() - Found question by order', [
+                                'form_id' => $form->id,
+                                'question_index' => $questionIndex,
+                                'question_id' => $questionId,
+                            ]);
+                        }
+                    }
+                }
+
+                // Only save if we have a valid question_id that exists in database
+                if ($questionId && $form->questions()->where('id', $questionId)->exists()) {
+                    FormTextFormatting::updateOrCreate(
+                        [
+                            'question_id' => $questionId,
+                            'element_type' => $elementType,
+                        ],
+                        array_merge($data, ['question_id' => $questionId])
+                    );
+                    Log::info('syncTextFormatting() - Saved question_title formatting', [
+                        'form_id' => $form->id,
+                        'question_id' => $questionId,
+                        'formatting' => $data,
+                    ]);
+                } else {
+                    Log::warning('syncTextFormatting() - Cannot save question_title formatting - invalid question_id', [
+                        'form_id' => $form->id,
+                        'question_index' => $questionIndex,
+                        'question_id' => $questionId,
+                        'question_exists' => $questionId ? $form->questions()->where('id', $questionId)->exists() : false,
+                    ]);
+                }
+            } elseif (in_array($elementType, ['section_title', 'section_description'])) {
+                // Map section_id from frontend index to database ID
+                $sectionIndex = $formatting['section_index'] ?? $formatting['section_id'] ?? null;
+                $sectionId = null;
+
+                if ($sectionIndex !== null) {
+                    // First, try to map from sectionIdMap (index-based mapping)
+                    if (isset($sectionIdMap[$sectionIndex])) {
+                        $sectionId = $sectionIdMap[$sectionIndex];
+                    } elseif (is_numeric($sectionIndex) && !isset($formatting['section_index'])) {
+                        // If it's numeric and not from section_index, check if it exists in database
+                        $sectionId = (int) $sectionIndex;
+                        $sectionExists = $form->sections()->where('id', $sectionId)->exists();
+                        if (!$sectionExists) {
+                            // If section doesn't exist, try to find by order
+                            $section = $form->sections()->where('order', $sectionIndex)->first();
+                            $sectionId = $section ? $section->id : null;
+                        }
+                    }
+                }
+
+                // Only save if we have a valid section_id that exists in database
+                if ($sectionId && $form->sections()->where('id', $sectionId)->exists()) {
+                    FormTextFormatting::updateOrCreate(
+                        [
+                            'section_id' => $sectionId,
+                            'element_type' => $elementType,
+                        ],
+                        array_merge($data, ['section_id' => $sectionId])
+                    );
+                }
+            } elseif (in_array($elementType, ['result_setting_title', 'result_setting_text'])) {
+                // Handle result setup card formatting
+                $resultRuleTextId = $formatting['result_rule_text_id'] ?? null;
+
+                if ($resultRuleTextId) {
+                    // Validate that result_rule_text_id exists
+                    $resultRuleTextExists = \App\Models\ResultRuleText::where('id', $resultRuleTextId)
+                        ->whereHas('resultRule', function ($query) use ($form) {
+                            $query->where('form_id', $form->id);
+                        })
+                        ->exists();
+
+                    if ($resultRuleTextExists) {
+                        // Delete any existing formatting for this result_rule_text_id and element_type first
+                        // to avoid unique constraint issues
+                        FormTextFormatting::where('result_rule_text_id', $resultRuleTextId)
+                            ->where('element_type', $elementType)
+                            ->delete();
+
+                        FormTextFormatting::create(
+                            array_merge($data, [
+                                'result_rule_text_id' => $resultRuleTextId,
+                                'form_id' => $form->id, // Add form_id for consistency
+                            ])
+                        );
+                    }
+                }
+            }
+        }
     }
 }

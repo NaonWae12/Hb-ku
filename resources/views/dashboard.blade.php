@@ -76,10 +76,10 @@
                     </div>
 
                     <!-- Title -->
-                    <h3 class="text-lg font-bold text-gray-900 mb-2">{{ $form['title'] }}</h3>
+                    <h3 class="text-lg font-bold text-gray-900 mb-2">{{ strip_tags($form['title']) }}</h3>
 
                     <!-- Description -->
-                    <p class="text-sm text-gray-600 mb-4">{{ $form['description'] }}</p>
+                    <p class="text-sm text-gray-600 mb-4">{{ strip_tags($form['description']) }}</p>
 
                     <!-- Statistics -->
                     <div class="flex items-center space-x-4 mb-4 text-sm text-gray-600">
