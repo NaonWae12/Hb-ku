@@ -3626,9 +3626,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const questionTypeButtons = document.querySelectorAll('.question-type-btn');
     
     // Langsung tambahkan pertanyaan default saat klik tombol
-    if (addQuestionBtn) {
-        addQuestionBtn.addEventListener('click', function() {
-            // Default type: short-answer (Jawaban singkat)
+    // Mengikuti versi bc_form-builder.js yang sederhana dan terbukti bekerja
+    // Sama seperti quick-add button di dalam kartu
+    if (addQuestionBtn && !addQuestionBtn.hasAttribute('data-listener')) {
+        addQuestionBtn.setAttribute('data-listener', 'true');
+        addQuestionBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
             const questionCard = createQuestionCard('short-answer');
             questionsContainer.appendChild(questionCard);
             updateQuestionNumbers();
@@ -3952,7 +3955,8 @@ function attachQuestionCardEvents(card) {
     };
     
     // Quick add question button
-    if (quickAddQuestionBtn) {
+    if (quickAddQuestionBtn && !quickAddQuestionBtn.hasAttribute('data-listener')) {
+        quickAddQuestionBtn.setAttribute('data-listener', 'true');
         quickAddQuestionBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             const questionsContainer = document.getElementById('questions-container');
