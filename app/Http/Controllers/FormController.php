@@ -637,6 +637,311 @@ class FormController extends Controller
         ]);
     }
 
+    public function export(Form $form, Request $request)
+    {
+        if ($form->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $type = $request->get('type', 'summary'); // 'summary' or 'individual'
+        
+        $data = $this->buildResponseData($form);
+        
+        // Create new Word document
+        $phpWord = new \PhpOffice\PhpWord\PhpWord();
+        
+        // Set document properties
+        $properties = $phpWord->getDocInfo();
+        $properties->setCreator('Hb-ku Form Builder');
+        $properties->setTitle(strip_tags($form->title) . ' - Export Responses');
+        $properties->setDescription('Export responses dari form: ' . strip_tags($form->title));
+        
+        // Add section
+        $section = $phpWord->addSection([
+            'marginTop' => 1440,
+            'marginBottom' => 1440,
+            'marginLeft' => 1440,
+            'marginRight' => 1440,
+        ]);
+        
+        // Add title
+        $section->addText(
+            strip_tags($form->title),
+            ['bold' => true, 'size' => 16],
+            ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]
+        );
+        
+        if ($form->description) {
+            $section->addText(
+                strip_tags($form->description),
+                ['size' => 12],
+                ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]
+            );
+        }
+        
+        $section->addTextBreak(2);
+        
+        // Add summary information
+        $section->addText(
+            'Total Jawaban: ' . $data['totalResponses'],
+            ['bold' => true, 'size' => 12]
+        );
+        $section->addTextBreak(1);
+        
+        // Collect temporary chart image files for cleanup
+        $tempChartFiles = [];
+        
+        if ($type === 'summary') {
+            // Export summary
+            $section->addText(
+                'SUMMARY RESPONSES',
+                ['bold' => true, 'size' => 14]
+            );
+            $section->addTextBreak(1);
+            
+            foreach ($data['questionSummaries'] as $index => $summary) {
+                $section->addText(
+                    'Pertanyaan ' . ($index + 1) . ': ' . strip_tags($summary['title']),
+                    ['bold' => true, 'size' => 12]
+                );
+                $section->addText('Total Jawaban: ' . $summary['total'], ['size' => 11]);
+                
+                if ($summary['chart']) {
+                    $section->addText('Hasil:', ['bold' => true, 'size' => 11]);
+                    
+                    // Generate chart image
+                    $chartImagePath = $this->generateChartImage($summary['chart'], $summary['id']);
+                    if ($chartImagePath && file_exists($chartImagePath)) {
+                        $tempChartFiles[] = $chartImagePath;
+                        $section->addImage(
+                            $chartImagePath,
+                            [
+                                'width' => 400,
+                                'height' => 300,
+                                'alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER,
+                            ]
+                        );
+                        $section->addTextBreak(1);
+                    }
+                    
+                    // Also add text summary
+                    foreach ($summary['chart']['labels'] as $labelIndex => $label) {
+                        $section->addText(
+                            '  - ' . strip_tags($label) . ': ' . $summary['chart']['values'][$labelIndex] . ' jawaban',
+                            ['size' => 11]
+                        );
+                    }
+                } elseif (!empty($summary['text_answers'])) {
+                    $section->addText('Jawaban:', ['bold' => true, 'size' => 11]);
+                    foreach ($summary['text_answers'] as $answer) {
+                        $section->addText('  - ' . strip_tags($answer), ['size' => 11]);
+                    }
+                }
+                
+                $section->addTextBreak(1);
+            }
+        } else {
+            // Export individual responses
+            $section->addText(
+                'INDIVIDUAL RESPONSES',
+                ['bold' => true, 'size' => 14]
+            );
+            $section->addTextBreak(1);
+            
+            foreach ($data['individualResponses'] as $index => $response) {
+                $section->addText(
+                    'Jawaban #' . ($index + 1),
+                    ['bold' => true, 'size' => 12]
+                );
+                $section->addText('Email: ' . ($response['email'] ?? 'Anonim'), ['size' => 11]);
+                $section->addText('Tanggal: ' . $response['submitted_at'], ['size' => 11]);
+                $section->addText('Skor Total: ' . ($response['total_score'] ?? 0), ['size' => 11]);
+                
+                if (!empty($response['answers'])) {
+                    $section->addText('Jawaban:', ['bold' => true, 'size' => 11]);
+                    foreach ($response['answers'] as $answer) {
+                        $section->addText(
+                            'Q: ' . strip_tags($answer['question']),
+                            ['bold' => true, 'size' => 11]
+                        );
+                        $section->addText(
+                            'A: ' . strip_tags($answer['value']),
+                            ['size' => 11]
+                        );
+                    }
+                }
+                
+                $section->addTextBreak(2);
+            }
+        }
+        
+        // Save file
+        $filename = 'export_' . $form->slug . '_' . $type . '_' . date('Y-m-d_His') . '.docx';
+        $tempFile = tempnam(sys_get_temp_dir(), 'phpword_');
+        
+        $objWriter = \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007');
+        $objWriter->save($tempFile);
+        
+        // Cleanup chart images after download
+        register_shutdown_function(function () use ($tempChartFiles) {
+            foreach ($tempChartFiles as $chartFile) {
+                if (file_exists($chartFile)) {
+                    @unlink($chartFile);
+                }
+            }
+        });
+        
+        return response()->download($tempFile, $filename)->deleteFileAfterSend(true);
+    }
+
+    /**
+     * Generate chart image using GD library
+     */
+    private function generateChartImage(array $chartData, int $questionId): ?string
+    {
+        if (!function_exists('imagecreatetruecolor')) {
+            return null; // GD library not available
+        }
+
+        $type = $chartData['type'] ?? 'pie';
+        $labels = $chartData['labels'] ?? [];
+        $values = $chartData['values'] ?? [];
+
+        if (empty($labels) || empty($values)) {
+            return null;
+        }
+
+        $width = 600;
+        $height = 400;
+        $image = imagecreatetruecolor($width, $height);
+
+        // Colors
+        $white = imagecolorallocate($image, 255, 255, 255);
+        $black = imagecolorallocate($image, 0, 0, 0);
+        $gray = imagecolorallocate($image, 200, 200, 200);
+        $colors = [
+            imagecolorallocate($image, 248, 113, 113), // #F87171
+            imagecolorallocate($image, 251, 191, 36), // #FBBF24
+            imagecolorallocate($image, 52, 211, 153), // #34D399
+            imagecolorallocate($image, 96, 165, 250), // #60A5FA
+            imagecolorallocate($image, 167, 139, 250), // #A78BFA
+            imagecolorallocate($image, 244, 114, 182), // #F472B6
+            imagecolorallocate($image, 249, 115, 22), // #F97316
+            imagecolorallocate($image, 45, 212, 191), // #2DD4BF
+        ];
+
+        // Fill background
+        imagefilledrectangle($image, 0, 0, $width, $height, $white);
+
+        if ($type === 'pie') {
+            $this->drawPieChart($image, $labels, $values, $colors, $black, $width, $height);
+        } else {
+            $this->drawBarChart($image, $labels, $values, $colors, $black, $gray, $width, $height);
+        }
+
+        // Save to temporary file
+        $tempFile = sys_get_temp_dir() . '/chart_' . $questionId . '_' . time() . '.png';
+        imagepng($image, $tempFile);
+        imagedestroy($image);
+
+        return $tempFile;
+    }
+
+    private function drawPieChart($image, array $labels, array $values, array $colors, $textColor, int $width, int $height): void
+    {
+        $centerX = $width / 2;
+        $centerY = $height / 2;
+        $radius = min($width, $height) / 3;
+        $startAngle = 0;
+
+        $total = array_sum($values);
+        if ($total == 0) return;
+
+        $labelY = 50;
+        $legendX = 50;
+        $legendSpacing = 25;
+
+        foreach ($values as $index => $value) {
+            if ($value == 0) continue;
+
+            $percentage = ($value / $total) * 100;
+            $angle = ($value / $total) * 360;
+
+            $color = $colors[$index % count($colors)];
+
+            // Draw pie slice
+            imagefilledarc(
+                $image,
+                $centerX,
+                $centerY,
+                $radius * 2,
+                $radius * 2,
+                $startAngle,
+                $startAngle + $angle,
+                $color,
+                IMG_ARC_PIE
+            );
+
+            // Draw legend
+            $label = strip_tags($labels[$index] ?? 'Label ' . ($index + 1));
+            if (strlen($label) > 30) {
+                $label = substr($label, 0, 27) . '...';
+            }
+            $legendText = $label . ' (' . $value . ')';
+            
+            // Color box
+            imagefilledrectangle($image, $legendX, $labelY - 10, $legendX + 15, $labelY + 5, $color);
+            imagerectangle($image, $legendX, $labelY - 10, $legendX + 15, $labelY + 5, $textColor);
+            
+            // Text
+            imagestring($image, 3, $legendX + 20, $labelY - 8, $legendText, $textColor);
+            $labelY += $legendSpacing;
+
+            $startAngle += $angle;
+        }
+    }
+
+    private function drawBarChart($image, array $labels, array $values, array $colors, $textColor, $gridColor, int $width, int $height): void
+    {
+        $margin = 60;
+        $chartWidth = $width - ($margin * 2);
+        $chartHeight = $height - ($margin * 2);
+        $barWidth = $chartWidth / max(count($values), 1);
+        $maxValue = max($values) ?: 1;
+
+        // Draw grid lines
+        $gridLines = 5;
+        for ($i = 0; $i <= $gridLines; $i++) {
+            $y = $margin + ($chartHeight / $gridLines) * $i;
+            imageline($image, $margin, $y, $width - $margin, $y, $gridColor);
+            $value = $maxValue - (($maxValue / $gridLines) * $i);
+            imagestring($image, 2, 10, $y - 7, (int)$value, $textColor);
+        }
+
+        // Draw bars
+        foreach ($values as $index => $value) {
+            $barHeight = ($value / $maxValue) * $chartHeight;
+            $x = $margin + ($barWidth * $index) + ($barWidth * 0.1);
+            $barActualWidth = $barWidth * 0.8;
+            $y = $margin + $chartHeight - $barHeight;
+
+            $color = $colors[$index % count($colors)];
+            imagefilledrectangle($image, $x, $y, $x + $barActualWidth, $margin + $chartHeight, $color);
+            imagerectangle($image, $x, $y, $x + $barActualWidth, $margin + $chartHeight, $textColor);
+
+            // Value label on top of bar
+            imagestring($image, 3, $x + ($barActualWidth / 2) - 10, $y - 20, (string)$value, $textColor);
+
+            // Label below bar
+            $label = strip_tags($labels[$index] ?? 'Label ' . ($index + 1));
+            if (strlen($label) > 15) {
+                $label = substr($label, 0, 12) . '...';
+            }
+            $labelX = $x + ($barActualWidth / 2) - (strlen($label) * 3);
+            imagestring($image, 2, $labelX, $margin + $chartHeight + 5, $label, $textColor);
+        }
+    }
+
     private function buildResponseData(Form $form): array
     {
         $form->loadMissing([
@@ -1297,8 +1602,35 @@ class FormController extends Controller
         $sections = $form->sections->sortBy('order')->values();
         $sectionIndexMap = [];
 
-        $sectionsData = $sections->map(function ($section, $index) use (&$sectionIndexMap) {
+        $sectionsData = $sections->map(function ($section, $index) use (&$sectionIndexMap, &$textFormattingData) {
             $sectionIndexMap[$section->id] = $index;
+
+            // Add section formatting (title and description)
+            foreach ($section->textFormattings as $formatting) {
+                if ($formatting->element_type === 'section_title') {
+                    $textFormattingData[] = [
+                        'element_type' => 'section_title',
+                        'section_index' => $index,
+                        'text_align' => $formatting->text_align,
+                        'font_family' => $formatting->font_family,
+                        'font_size' => $formatting->font_size,
+                        'font_weight' => $formatting->font_weight,
+                        'font_style' => $formatting->font_style,
+                        'text_decoration' => $formatting->text_decoration,
+                    ];
+                } elseif ($formatting->element_type === 'section_description') {
+                    $textFormattingData[] = [
+                        'element_type' => 'section_description',
+                        'section_index' => $index,
+                        'text_align' => $formatting->text_align,
+                        'font_family' => $formatting->font_family,
+                        'font_size' => $formatting->font_size,
+                        'font_weight' => $formatting->font_weight,
+                        'font_style' => $formatting->font_style,
+                        'text_decoration' => $formatting->text_decoration,
+                    ];
+                }
+            }
 
             return [
                 'title' => $section->title,

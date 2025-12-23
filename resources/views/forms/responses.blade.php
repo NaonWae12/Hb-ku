@@ -21,6 +21,25 @@
             </div>
         </div>
 
+        <div class="flex items-center justify-end gap-3 mb-4">
+            <a href="{{ route('forms.export', ['form' => $form->id, 'type' => 'summary']) }}" 
+               id="export-summary-btn"
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-50">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export Summary
+            </a>
+            <a href="{{ route('forms.export', ['form' => $form->id, 'type' => 'individual']) }}" 
+               id="export-individual-btn"
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-50 hidden">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export Individual
+            </a>
+        </div>
+
         <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div class="bg-white rounded-xl border border-gray-200 p-5">
                 <p class="text-sm text-gray-500">Total Jawaban</p>
@@ -59,7 +78,7 @@
                                 <div class="flex items-start justify-between mb-4">
                                     <div>
                                         <p class="text-sm text-gray-500">Pertanyaan {{ $loop->iteration }}</p>
-                                        <h3 class="text-lg font-semibold text-gray-900">{{ $summary['title'] }}</h3>
+                                        <h3 class="text-lg font-semibold text-gray-900">{{ strip_tags($summary['title']) }}</h3>
                                     </div>
                                     <span class="text-sm text-gray-500">{{ $summary['total'] }} jawaban</span>
                                 </div>
@@ -72,7 +91,7 @@
                                     <div class="space-y-3">
                                         @if(!empty($summary['text_answers']))
                                             @foreach($summary['text_answers'] as $answer)
-                                                <div class="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 border border-gray-100">{{ $answer }}</div>
+                                                <div class="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 border border-gray-100">{{ strip_tags($answer) }}</div>
                                             @endforeach
                                         @else
                                             <p class="text-sm text-gray-500">Belum ada jawaban untuk pertanyaan ini.</p>
@@ -124,6 +143,19 @@
 @if($totalResponses > 0)
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
+        // Helper function to strip HTML tags and decode entities
+        function stripHTMLAndDecode(htmlString) {
+            if (!htmlString || typeof htmlString !== 'string') {
+                return htmlString || '';
+            }
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = htmlString;
+            const textContent = tempDiv.textContent || tempDiv.innerText || '';
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = textContent;
+            return textarea.value || textContent;
+        }
+
         const summaryData = @json($questionSummaries);
         summaryData.forEach((item) => {
             if (!item.chart) return;
@@ -134,10 +166,13 @@
             const colors = ['#F87171', '#FBBF24', '#34D399', '#60A5FA', '#A78BFA', '#F472B6', '#F97316', '#2DD4BF'];
             const colorSet = item.chart.values.map((_, index) => colors[index % colors.length]);
 
+            // Strip HTML from chart labels
+            const cleanLabels = item.chart.labels.map(label => stripHTMLAndDecode(label));
+
             new Chart(ctx, {
                 type: item.chart.type,
                 data: {
-                    labels: item.chart.labels,
+                    labels: cleanLabels,
                     datasets: [{
                         label: 'Jumlah Jawaban',
                         data: item.chart.values,
@@ -169,6 +204,19 @@
         const individualResponses = @json($individualResponses);
         let currentIndex = 0;
 
+        // Helper function to strip HTML tags and decode entities
+        function stripHTMLAndDecode(htmlString) {
+            if (!htmlString || typeof htmlString !== 'string') {
+                return htmlString || '';
+            }
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = htmlString;
+            const textContent = tempDiv.textContent || tempDiv.innerText || '';
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = textContent;
+            return textarea.value || textContent;
+        }
+
         function renderResponse(index) {
             const data = individualResponses[index];
             if (!data) return;
@@ -193,11 +241,11 @@
 
                     const title = document.createElement('p');
                     title.className = 'text-sm font-medium text-gray-900';
-                    title.textContent = answer.question;
+                    title.textContent = stripHTMLAndDecode(answer.question);
 
                     const value = document.createElement('p');
                     value.className = 'mt-1 text-sm text-gray-700';
-                    value.textContent = answer.value || '-';
+                    value.textContent = stripHTMLAndDecode(answer.value || '-');
 
                     block.appendChild(title);
                     block.appendChild(value);
@@ -258,6 +306,12 @@
 
         individualPanel.classList.remove('hidden');
         summaryPanel.classList.add('hidden');
+        
+        // Toggle export buttons
+        const exportSummaryBtn = document.getElementById('export-summary-btn');
+        const exportIndividualBtn = document.getElementById('export-individual-btn');
+        if (exportSummaryBtn) exportSummaryBtn.classList.add('hidden');
+        if (exportIndividualBtn) exportIndividualBtn.classList.remove('hidden');
     });
 </script>
 @endpush

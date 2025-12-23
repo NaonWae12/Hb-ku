@@ -320,13 +320,25 @@ $responsesStats = $responsesStats ?? [
                                 Individual
                             </button>
                         </div>
-                        @if($shareUrl)
-                        <button id="builder-open-share" type="button" class="text-sm font-medium text-red-600 hover:text-red-700 flex items-center space-x-2" data-share-url="{{ $shareUrl }}">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 8a3 3 0 013 3v7a3 3 0 01-3 3H6a3 3 0 01-3-3v-7a3 3 0 013-3h9m4-3h-5m0 0V0m0 5l2.5-2.5" />
-                            </svg>
-                            <span>Bagikan Form</span>
-                        </button>
+                        @if($formId)
+                        <div class="flex items-center space-x-2">
+                            <a href="{{ route('forms.export', ['form' => $formId, 'type' => 'summary']) }}" 
+                               id="builder-export-summary" 
+                               class="text-sm font-medium text-red-600 hover:text-red-700 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span>Export Summary</span>
+                            </a>
+                            <a href="{{ route('forms.export', ['form' => $formId, 'type' => 'individual']) }}" 
+                               id="builder-export-individual" 
+                               class="text-sm font-medium text-red-600 hover:text-red-700 flex items-center space-x-2 hidden">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span>Export Individual</span>
+                            </a>
+                        </div>
                         @endif
                     </div>
 

@@ -20,33 +20,52 @@ class PublicFormController extends Controller
         abort_unless($form->is_active, 404);
 
         $form->load([
+            'header',
+            'textFormattings',
             'sections' => function ($query) {
                 $query->orderBy('order')
-                    ->with(['questions' => function ($questionQuery) {
-                        $questionQuery->orderBy('order')
-                            ->with(['options' => function ($optionQuery) {
-                                $optionQuery->orderBy('order')
-                                    ->with('answerTemplate');
-                            }]);
-                    }]);
+                    ->with([
+                        'textFormattings',
+                        'questions' => function ($questionQuery) {
+                            $questionQuery->orderBy('order')
+                                ->with([
+                                    'textFormatting',
+                                    'options' => function ($optionQuery) {
+                                        $optionQuery->orderBy('order')
+                                            ->with('answerTemplate');
+                                    }
+                                ]);
+                        }
+                    ]);
             },
             'questions' => function ($query) {
                 $query->orderBy('order')
-                    ->with(['options' => function ($optionQuery) {
-                        $optionQuery->orderBy('order')
-                            ->with('answerTemplate');
-                    }]);
+                    ->with([
+                        'textFormatting',
+                        'options' => function ($optionQuery) {
+                            $optionQuery->orderBy('order')
+                                ->with('answerTemplate');
+                        }
+                    ]);
             },
         ]);
 
         // Group questions into pages based on sections as dividers
         $pages = $this->groupQuestionsIntoPages($form);
 
+        // Prepare formatting data
+        $formattingMap = $this->prepareFormattingMap($form);
+
+        // Collect all unique font families used in formatting
+        $usedFonts = $this->collectUsedFonts($formattingMap);
+
         return view('forms.public', [
             'form' => $form,
             'pages' => $pages,
             'totalPages' => count($pages),
             'shareUrl' => route('forms.public.show', $form),
+            'formattingMap' => $formattingMap,
+            'usedFonts' => $usedFonts,
         ]);
     }
 
@@ -63,8 +82,14 @@ class PublicFormController extends Controller
         $description = trim($section->description ?? '');
         $hasImage = !empty($section->image);
 
-        // Check if title is not empty and not a default "Bagian X" pattern
-        $hasValidTitle = $title !== '' && !preg_match('/^Bagian\s+\d+$/i', $title);
+        // Strip HTML tags for validation check only
+        $titlePlainText = strip_tags($title);
+        // If title has HTML tags, it means it's been formatted, so it's valid
+        $hasHtmlTags = $title !== $titlePlainText;
+        // Check if it's not a default "Bagian X" pattern
+        $isNotDefaultPattern = !preg_match('/^Bagian\s+\d+$/i', trim($titlePlainText));
+        // Title is valid if it has content AND (has HTML tags OR is not default pattern)
+        $hasValidTitle = $title !== '' && ($hasHtmlTags || $isNotDefaultPattern);
 
         return $hasValidTitle || $description !== '' || $hasImage;
     }
@@ -502,5 +527,99 @@ class PublicFormController extends Controller
         }
 
         return $scoreMap[$key] ?? null;
+    }
+
+    /**
+     * Prepare formatting map for easy access in views
+     */
+    private function prepareFormattingMap(Form $form): array
+    {
+        $formattingMap = [];
+
+        // Form title and description formatting
+        foreach ($form->textFormattings as $formatting) {
+            if ($formatting->element_type === 'form_title') {
+                $formattingMap['form_title'] = [
+                    'text_align' => $formatting->text_align ?? 'left',
+                    'font_family' => $formatting->font_family ?? null,
+                    'font_size' => $formatting->font_size ?? null,
+                    'font_weight' => $formatting->font_weight ?? 'normal',
+                    'font_style' => $formatting->font_style ?? 'normal',
+                    'text_decoration' => $formatting->text_decoration ?? 'none',
+                ];
+            } elseif ($formatting->element_type === 'form_description') {
+                $formattingMap['form_description'] = [
+                    'text_align' => $formatting->text_align ?? 'left',
+                    'font_family' => $formatting->font_family ?? null,
+                    'font_size' => $formatting->font_size ?? null,
+                    'font_weight' => $formatting->font_weight ?? 'normal',
+                    'font_style' => $formatting->font_style ?? 'normal',
+                    'text_decoration' => $formatting->text_decoration ?? 'none',
+                ];
+            }
+        }
+
+        // Question title formatting
+        foreach ($form->questions as $question) {
+            if ($question->textFormatting) {
+                $formatting = $question->textFormatting;
+                $formattingMap["question_title_{$question->id}"] = [
+                    'text_align' => $formatting->text_align ?? 'left',
+                    'font_family' => $formatting->font_family ?? null,
+                    'font_size' => $formatting->font_size ?? null,
+                    'font_weight' => $formatting->font_weight ?? 'normal',
+                    'font_style' => $formatting->font_style ?? 'normal',
+                    'text_decoration' => $formatting->text_decoration ?? 'none',
+                ];
+            }
+        }
+
+        // Section title and description formatting
+        foreach ($form->sections as $section) {
+            foreach ($section->textFormattings as $formatting) {
+                if ($formatting->element_type === 'section_title') {
+                    $formattingMap["section_title_{$section->id}"] = [
+                        'text_align' => $formatting->text_align ?? 'left',
+                        'font_family' => $formatting->font_family ?? null,
+                        'font_size' => $formatting->font_size ?? null,
+                        'font_weight' => $formatting->font_weight ?? 'normal',
+                        'font_style' => $formatting->font_style ?? 'normal',
+                        'text_decoration' => $formatting->text_decoration ?? 'none',
+                    ];
+                } elseif ($formatting->element_type === 'section_description') {
+                    $formattingMap["section_description_{$section->id}"] = [
+                        'text_align' => $formatting->text_align ?? 'left',
+                        'font_family' => $formatting->font_family ?? null,
+                        'font_size' => $formatting->font_size ?? null,
+                        'font_weight' => $formatting->font_weight ?? 'normal',
+                        'font_style' => $formatting->font_style ?? 'normal',
+                        'text_decoration' => $formatting->text_decoration ?? 'none',
+                    ];
+                }
+            }
+        }
+
+        return $formattingMap;
+    }
+
+    /**
+     * Collect all unique font families used in formatting
+     */
+    private function collectUsedFonts(array $formattingMap): array
+    {
+        $fonts = [];
+        $systemFonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia', 'Comic Sans MS'];
+
+        foreach ($formattingMap as $formatting) {
+            if (isset($formatting['font_family']) && $formatting['font_family']) {
+                $fontFamily = trim($formatting['font_family']);
+                // Skip system fonts and empty values
+                if (!empty($fontFamily) && !in_array($fontFamily, $systemFonts, true)) {
+                    $fonts[$fontFamily] = true;
+                }
+            }
+        }
+
+        return array_keys($fonts);
     }
 }
